@@ -6,17 +6,24 @@ One declarative power policy for a Hyprland laptop on NixOS.
 
 ## Why
 
-Four daemons hold pieces of a laptop's power policy, and they split it by
-power source inconsistently:
+The Hypr ecosystem has an idle daemon, a lock screen, a bar and a wallpaper
+daemon. It has no power manager. GNOME and KDE ship one; here the pieces
+exist but nothing joins them, and each covers a different part of the job:
 
-| | splits by AC / battery? |
-|---|---|
-| hypridle — idle timeouts | **no** ([issue #67](https://github.com/hyprwm/hypridle/issues/67), open) |
-| logind — lid, power button | only the lid |
-| acpid — ACPI events | no |
-| TLP — hardware tunables | every setting |
+| | owns | splits by AC / battery |
+|---|---|---|
+| hypridle | idle timeouts | **no** ([issue #67](https://github.com/hyprwm/hypridle/issues/67), open) |
+| logind | lid, power button | only the lid |
+| acpid | ACPI events | no |
+| TLP | hardware tunables | every setting |
 
-hyprpower puts the whole table in one file and compiles it:
+So there is nowhere to write down what the laptop should do, and nothing to
+check that it does it. Some behaviours have no home at all: acting on a
+battery level, escalating a suspend to hibernate, treating charge thresholds
+as policy rather than as a TLP setting.
+
+hyprpower is that layer. One file, compiled to the four places the pieces
+actually read:
 
 ```
 profile.toml ──▶ hypridle.conf          one listener per rung per power source
