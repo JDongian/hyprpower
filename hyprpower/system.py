@@ -468,7 +468,7 @@ def run_action(pol: dict, name: str) -> None:
         if cmd := EVENT_ACTIONS[name]:   # "ignore" maps to None on purpose
             run(*cmd)
     else:
-        raise SystemExit(f"unknown action in policy: {name}")
+        raise SystemExit(f"unknown action in profile: {name}")
 
 
 def ev_power() -> int:

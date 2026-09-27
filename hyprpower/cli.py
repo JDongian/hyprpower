@@ -35,7 +35,7 @@ def main() -> None:
         from . import report
         pol = system.load()
         found = report.problems(pol, system.read(pol))
-        print("\n".join(found) if found else "system matches policy.toml")
+        print("\n".join(found) if found else "system matches the profile")
         raise SystemExit(1 if found else 0)
     if cmd == "tui":
         from .tui import main as tui_main

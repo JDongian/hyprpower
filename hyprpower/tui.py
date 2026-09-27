@@ -176,7 +176,7 @@ class HyprPower(App):
         GENERATOR changed rather than a value -- e.g. a new rung -- which
         shows as stale text with no row-level diff."""
         if not self.problems:
-            self.notify("nothing to apply — system matches policy.toml")
+            self.notify("nothing to apply — system matches the profile")
             return
         self.push_screen(ConfirmApply(self.pending, self.problems), self._do_apply)
 
@@ -191,7 +191,7 @@ class HyprPower(App):
             # Cached from startup, so this normally does not prompt; drop the
             # alt screen anyway in case the credential has since timed out.
             with self.suspend():
-                print("\nApplying system settings (logind, charge thresholds)...")
+                print("\nApplying the system half (logind, charge thresholds)...")
                 rc = sudo_apply_system()
             if rc:
                 self.notify(f"nothing applied (sudo exit {rc})", severity="error")
@@ -323,7 +323,7 @@ class EditValue(ModalScreen):
     def compose(self) -> ComposeResult:
         with Vertical(id="editbox"):
             yield Static(Text(".".join(self.path), style="bold"))
-            yield Static(Text("enter = save to policy.toml, escape = cancel\n"
+            yield Static(Text("enter = save to the profile, escape = cancel\n"
                               "'never' for no action", style="dim"))
             yield Input(value=str(self.value), id="value")
 

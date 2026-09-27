@@ -84,7 +84,7 @@ def build(pol: dict, st: dict):
 
     # --- 1. Status -------------------------------------------------------
     status = [
-        r("now.source", "Power source", ["AC" if st["on_ac"] else "battery"]),
+        r("now.source", "Power source", ["Plugged in" if st["on_ac"] else "On battery"]),
         r("now.charge", "Battery level", [f'{st["percent"]}%']),
         r("now.status", "Charging status", [st["status"]]),
         # power_now is the CHARGE rate when plugged in and the DISCHARGE rate
@@ -92,7 +92,7 @@ def build(pol: dict, st: dict):
         # and reads as "the laptop uses 0 W" while idle on AC.
         r("now.rate", RATE_LABEL.get(st["status"], "Battery power flow"),
           [f'{st["watts"]:.1f} W' if st["watts"] else "—"]),
-        r("now.backlight", "Screen brightness",
+        r("now.backlight", "Display brightness",
           [f'{st["bl_now"]}/{st["bl_max"]} ({100 * st["bl_now"] / st["bl_max"]:.0f}%)']),
         r("now.cycles", "Cycle count", [st["cycles"]]),
         r("now.health", "Battery health",
@@ -119,7 +119,7 @@ def build(pol: dict, st: dict):
         # is the artifact, hypridle is what enforces it. A "stale config"
         # flag referring to a file the UI never showed was just confusing.
         r("sys.policy", "Profile", [st["profile"]]),
-        r("sys.generated", "Idle config (generated)",
+        r("sys.generated", "Generated config",
           [st["generated"]]),
         None,
     ]
@@ -166,7 +166,7 @@ def build(pol: dict, st: dict):
         r("chg.stop", "Stop charging at", [pct(chg["stop"])]),
     ]
     logind_rows = [
-        r("idle.logind", "Idle action (logind)",
+        r("idle.logind", "Idle action",
           [f'{lg["IdleAction"]}   (armed {secs(lg["IdleActionUSec"])})']),
         r("susp.inhibit", "Inhibit delay max", [secs(lg["InhibitDelayMaxUSec"])]),
     ]
@@ -189,13 +189,13 @@ def build(pol: dict, st: dict):
             grouped.setdefault(tlp_group(key), []).append(
                 r(f"tlp.{key}", key.lower() + star(key), [val or "—", ""]))
     grouped.setdefault("Charging policy", []).extend([
-        r("tlp.cstart", "in effect now: start charging below",
+        r("tlp.cstart", "in force: start charging below",
           [pct(st["charge_start"]), ""]),
-        r("tlp.cstop", "in effect now: stop charging at",
+        r("tlp.cstop", "in force: stop charging at",
           [pct(st["charge_stop"]), ""]),
     ])
     grouped.setdefault("CPU and platform", []).append(
-        r("tlp.now", "in effect now: cpu governor", [st["governor"], ""]))
+        r("tlp.now", "in force: cpu governor", [st["governor"], ""]))
     tlp_sheets = [(name, TWO, sorted(rows, key=lambda x: x[1]))
                   for name in [g for g, _ in TLP_GROUPS] + ["Other"]
                   if (rows := grouped.get(name))]
@@ -206,7 +206,7 @@ def build(pol: dict, st: dict):
         ("Status", [(None, ONE, status), ("System", ONE, system)]),
         ("Hardware", [("Button and lid triggers", TWO, press),
                       ("Suspend and hibernate mechanism", ONE, mech)]),
-        ("Power management", [("Idle Actions", TWO, ladder),
+        ("Power management", [("Idle actions", TWO, ladder),
                               ("Battery level triggers (only on battery)", ONE, charge),
                               ("Idle, system-wide (logind)", ONE, logind_rows)]),
         ("TLP", tlp_sheets),
@@ -226,7 +226,8 @@ def flags(pol, st, shown):
     by_source = {src: sorted((t, a) for t, s_, a, _ in policy.rungs(pol) if s_ == src)
                  for src in policy.SOURCES}
     if not any(a in policy.SLEEP for rs in by_source.values() for _t, a in rs):
-        add("Never sleeps when idle. Stays awake until you close the lid.",
+        add("Never suspends or hibernates when idle. Stays awake until you close "
+            "the lid.",
             "idle.suspend", "lid.close")
     if cols := policy.collisions(pol):
         add("Two actions fire at the same time. Order is up to hypridle.",
@@ -259,7 +260,7 @@ def flags(pol, st, shown):
         add("Scheduled after the machine is already asleep, so it never runs.",
             *sorted(dead))
     if volatile:
-        add("This sleep never reaches disk, so the battery can run flat.",
+        add("This suspend never reaches disk, so the battery can run flat.",
             *sorted(volatile), "idle.hibernate")
 
     # s2idle vs deep is a row, not a finding: hibernate bounds the drain
@@ -317,15 +318,15 @@ def pending(pol: dict, st: dict) -> list[tuple[str, str, str, bool]]:
 def problems(pol: dict, st: dict) -> list[str]:
     out = []
     if st["live_hypridle"] is None:
-        out.append("Idle config is missing. Apply to write it.")
+        out.append("Generated config is missing. Apply to write it.")
     elif st["live_hypridle"] != st["want_hypridle"]:
-        out.append("Idle config is out of date. Apply to update it.")
+        out.append("Generated config is out of date. Apply to update it.")
     if lid_drift(pol, st):
-        out.append("Lid action in logind does not match policy. Apply to fix.")
+        out.append("Lid action in logind does not match the profile. Apply to fix.")
     if charge_drift(pol, st):
         out.append("Charge thresholds do not match policy. Apply to fix.")
     if policy.sleep_text(pol) != st["live_sleep"]:
-        out.append("Hibernate delay in systemd does not match policy. Apply to fix.")
+        out.append("Hibernate delay in systemd does not match the profile. Apply to fix.")
     return out
 
 
