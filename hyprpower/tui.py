@@ -11,6 +11,9 @@ the whole machine.
 
 from __future__ import annotations
 
+import os
+import sys
+
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Vertical, VerticalScroll
@@ -24,6 +27,76 @@ from . import report, system
 from .report import EDITABLE, build, coerce, current, pending, problems
 
 HL = "bold black on yellow"
+
+
+class ConfirmApply(ModalScreen[bool]):
+    """GParted-style: list exactly what will change, then confirm."""
+
+    BINDINGS = [("y", "ok", "apply"), ("n", "cancel", "cancel"),
+                ("escape", "cancel", "cancel")]
+    CSS = """
+    ConfirmApply { align: center middle; }
+    #box { width: 84; height: auto; border: thick $warning; padding: 1 2;
+           background: $surface; }
+    """
+
+    def __init__(self, changes: dict, problems: list[str]) -> None:
+        super().__init__()
+        self.changes = changes
+        self.problems = problems
+
+    def compose(self) -> ComposeResult:
+        lines = [Text("Apply these changes?\n", style="bold")]
+        for p in self.changes.values():
+            line = Text(f"  {p.row:24} {p.have}  ->  ", style="")
+            line.append(str(p.want), style="bold")
+            if p.needs_root:
+                line.append("   (needs root)", style="dim")
+            lines.append(line)
+        if not self.changes:
+            for problem in self.problems:
+                lines.append(Text(f"  {problem}", style="dim"))
+        body = Text("\n").join(lines)
+        body.append("\n\n  y = apply    n = cancel", style="dim")
+        yield Static(body, id="box")
+
+    def action_ok(self) -> None:
+        self.dismiss(True)
+
+    def action_cancel(self) -> None:
+        self.dismiss(False)
+
+
+class EditValue(ModalScreen):
+    """Prompt for one value. Writing goes to policy.toml, not the system --
+    applying is a separate, confirmed step."""
+
+    BINDINGS = [("escape", "cancel", "cancel")]
+    CSS = """
+    EditValue { align: center middle; }
+    #editbox { width: 70; height: auto; border: thick $accent;
+               padding: 1 2; background: $surface; }
+    """
+
+    def __init__(self, path, value) -> None:
+        super().__init__()
+        self.path, self.value = path, value
+
+    def compose(self) -> ComposeResult:
+        with Vertical(id="editbox"):
+            yield Static(Text(".".join(self.path), style="bold"))
+            yield Static(Text("enter = save to the profile, escape = cancel\n"
+                              "'never' for no action", style="dim"))
+            yield Input(value=str(self.value), id="value")
+
+    def on_mount(self) -> None:
+        self.query_one("#value", Input).focus()
+
+    def on_input_submitted(self, event: Input.Submitted) -> None:
+        self.dismiss((self.path, event.value))
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
 
 
 class HyprPower(App):
@@ -182,7 +255,6 @@ class HyprPower(App):
     def _do_apply(self, confirmed: bool | None) -> None:
         if not confirmed:
             return
-        from .system import apply_session, sudo_apply_system
         root = any(p.needs_root for p in self.pending.values())
         if root:
             # Before apply_session, not after: a declined password used to
@@ -191,11 +263,11 @@ class HyprPower(App):
             # alt screen anyway in case the credential has since timed out.
             with self.suspend():
                 print("\nApplying the system half (logind, charge thresholds)...")
-                rc = sudo_apply_system()
+                rc = system.sudo_apply_system()
             if rc:
                 self.notify(f"nothing applied (sudo exit {rc})", severity="error")
                 return
-        apply_session()
+        system.apply_session()
         self.notify("applied (system + session)" if root else "applied")
         self.action_reload()
 
@@ -253,7 +325,6 @@ def main() -> None:
     # write ~/.config and drive the user's hypridle), but applying needs root
     # for the logind drop-in and the charge thresholds. Caching the credential
     # here means the apply never stops to ask.
-    import os, sys
     if os.geteuid() == 0:
         print("run hyprpower as your own user, not root: as root there is no "
               "user bus, so hypridle cannot be read or restarted. It escalates "
@@ -266,71 +337,3 @@ def main() -> None:
     HyprPower().run()
 
 
-class ConfirmApply(ModalScreen[bool]):
-    """GParted-style: list exactly what will change, then confirm."""
-
-    BINDINGS = [("y", "ok", "apply"), ("n", "cancel", "cancel"),
-                ("escape", "cancel", "cancel")]
-    CSS = """
-    ConfirmApply { align: center middle; }
-    #box { width: 84; height: auto; border: thick $warning; padding: 1 2;
-           background: $surface; }
-    """
-
-    def __init__(self, changes: dict, problems: list[str]) -> None:
-        super().__init__()
-        self.changes = changes
-        self.problems = problems
-
-    def compose(self) -> ComposeResult:
-        lines = [Text("Apply these changes?\n", style="bold")]
-        for p in self.changes.values():
-            line = Text(f"  {p.row:24} {p.have}  ->  ", style="")
-            line.append(str(p.want), style="bold")
-            if p.needs_root:
-                line.append("   (needs root)", style="dim")
-            lines.append(line)
-        if not self.changes:
-            for problem in self.problems:
-                lines.append(Text(f"  {problem}", style="dim"))
-        body = Text("\n").join(lines)
-        body.append("\n\n  y = apply    n = cancel", style="dim")
-        yield Static(body, id="box")
-
-    def action_ok(self) -> None:
-        self.dismiss(True)
-
-    def action_cancel(self) -> None:
-        self.dismiss(False)
-
-
-class EditValue(ModalScreen):
-    """Prompt for one value. Writing goes to policy.toml, not the system --
-    applying is a separate, confirmed step."""
-
-    BINDINGS = [("escape", "cancel", "cancel")]
-    CSS = """
-    EditValue { align: center middle; }
-    #editbox { width: 70; height: auto; border: thick $accent;
-               padding: 1 2; background: $surface; }
-    """
-
-    def __init__(self, path, value) -> None:
-        super().__init__()
-        self.path, self.value = path, value
-
-    def compose(self) -> ComposeResult:
-        with Vertical(id="editbox"):
-            yield Static(Text(".".join(self.path), style="bold"))
-            yield Static(Text("enter = save to the profile, escape = cancel\n"
-                              "'never' for no action", style="dim"))
-            yield Input(value=str(self.value), id="value")
-
-    def on_mount(self) -> None:
-        self.query_one("#value", Input).focus()
-
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        self.dismiss((self.path, event.value))
-
-    def action_cancel(self) -> None:
-        self.dismiss(None)

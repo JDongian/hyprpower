@@ -67,18 +67,18 @@ class Step(NamedTuple):
     restores: bool      # activity undoes it, so the listener gets on-resume
 
 
-STEPS = [Step("dim", Action.DIM, True),
+STEPS = (Step("dim", Action.DIM, True),
          Step("backlight_off", Action.BACKLIGHT_OFF, True),
          Step("display_off", Action.DISPLAY_OFF, True),
          Step("lock", Action.LOCK, False),
          Step("suspend", Action.SUSPEND, False),
-         Step("hibernate", Action.HIBERNATE, False)]
+         Step("hibernate", Action.HIBERNATE, False))
 
 ROW = {s.action: f"idle.{s.key}" for s in STEPS}
 
 # Every key that must be present. hyprpower holds no values of its own, so a
 # missing key is an error, not a default.
-REQUIRED = (
+REQUIRED = tuple(
     [("display", "dim_to"), ("lock", "unit"), ("lock", "restart_on_resume"),
      ("lid", "docked"), ("lid", "ac"), ("lid", "battery"),
      ("battery", "charge", "start"), ("battery", "charge", "stop"),

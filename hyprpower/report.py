@@ -51,18 +51,18 @@ class Col(IntEnum):
 
 ONE, TWO = [""], ["Plugged in", "On battery"]
 
-LADDER = [("Dim display after", "dim"),
+LADDER = (("Dim display after", "dim"),
           ("Turn off backlight after", "backlight_off"),
           ("Turn off display after", "display_off"),
           ("Lock after", "lock"),
           ("Suspend after", "suspend"),
-          ("Hibernate after", "hibernate")]
+          ("Hibernate after", "hibernate"))
 LABEL = {key: label for label, key in LADDER}
 RATE_LABEL = {"Discharging": "Discharge rate", "Charging": "Charge rate"}
 
 # TLP has ~59 settings. Grouped by what each controls, most consequential
 # first; vendor-irrelevant ones last.
-TLP_GROUPS = [
+TLP_GROUPS = (
     ("Charging policy", ("START_CHARGE", "STOP_CHARGE", "RESTORE_THRESHOLDS")),
     ("CPU and platform", ("CPU_", "PLATFORM_PROFILE", "NMI_")),
     ("Radios and network", ("WIFI_", "WOL_", "DEVICES_TO_")),
@@ -71,7 +71,7 @@ TLP_GROUPS = [
     ("Audio", ("SOUND_",)),
     ("Graphics", ("AMDGPU_", "RADEON_", "INTEL_")),
     ("TLP itself", ("TLP_", "NATACPI", "TPSMAPI", "TPACPI", "RESTORE_DEVICE")),
-]
+)
 
 
 def tlp_group(key: str) -> str:
@@ -93,6 +93,119 @@ def secs(v) -> str:
 def pct(v) -> str:
     return "—" if v is None else f"{v}%"
 
+
+LID_ROW = {"HandleLidSwitchExternalPower": "lid.close",
+           "HandleLidSwitch": "lid.close",
+           "HandleLidSwitchDocked": "lid.docked"}
+
+CHARGE_ROW = (("start", "charge_start", "chg.start"),
+              ("stop", "charge_stop", "chg.stop"))
+
+
+def lid_drift(pol: dict, st: dict) -> list[Drift]:
+    want = policy.logind_want(pol)
+    return [Drift(LID_ROW[prop], prop, st["logind"][prop], v)
+            for prop, v in want.items() if st["logind"][prop] != v]
+
+
+def charge_drift(pol: dict, st: dict) -> list[Drift]:
+    return [Drift(rid, key, st[key], pol["battery"]["charge"][name])
+            for name, key, rid in CHARGE_ROW
+            if st[key] != pol["battery"]["charge"][name]]
+
+
+def pending(pol: dict, st: dict) -> list[Pending]:
+    live = policy.parse_generated(st["live_hypridle"]) if st["live_hypridle"] else {}
+    want = {(r.source, r.action): r.after for r in policy.rungs(pol)}
+    rows: dict[str, tuple] = {}
+    for key in sorted(set(want) | set(live)):
+        if want.get(key) != live.get(key):
+            rid = policy.ROW[key[1]]
+            rows.setdefault(rid, Pending(rid, secs(live.get(key)),
+                                         secs(want.get(key)), False))
+    out = list(rows.values())
+    out += [Pending(d.row, d.have, d.want, True) for d in lid_drift(pol, st)]
+    out += [Pending(d.row, f"{d.have}%", f"{d.want}%", True)
+            for d in charge_drift(pol, st)]
+    return out
+
+
+def problems(pol: dict, st: dict) -> list[str]:
+    out = []
+    if st["live_hypridle"] is None:
+        out.append("Generated config is missing. Apply to write it.")
+    elif st["live_hypridle"] != st["want_hypridle"]:
+        out.append("Generated config is out of date. Apply to update it.")
+    if lid_drift(pol, st):
+        out.append("Lid action in logind does not match the profile. Apply to fix.")
+    if charge_drift(pol, st):
+        out.append("Charge thresholds do not match the profile. Apply to fix.")
+    if policy.sleep_text(pol) != st["live_sleep"]:
+        out.append("Hibernate delay in systemd does not match the profile. Apply to fix.")
+    return out
+
+
+def flags(pol, st, shown):
+    """Static sentences. The values that triggered each one are rendered from
+    its deps, so nothing here interpolates."""
+    out = []
+    add = lambda text, *deps: out.append((text, [d for d in deps if d in shown]))
+    idle, lg = pol["idle"], st["logind"]
+
+    # Over the emitted listeners, not the raw policy: a hibernate that
+    # follows a suspend is dropped, because systemd performs that escalation.
+    by_source = {src: sorted((r.after, r.action) for r in policy.rungs(pol) if r.source == src)
+                 for src in policy.SOURCES}
+    if not any(a in policy.SLEEPS for rs in by_source.values() for _t, a in rs):
+        add("Never suspends or hibernates when idle. Stays awake until you close "
+            "the lid.",
+            "idle.suspend", "lid.close")
+    if cols := policy.collisions(pol):
+        add("Two actions fire at the same time. Order is up to hypridle.",
+            *sorted({policy.ROW[a] for _, _, acts in cols for a in acts}))
+    # Inverted: `ignore` is systemd's default and is correct. An action here
+    # would mean logind and hypridle both hold idle policy and race.
+    if len(policy.delay_gaps(pol)) > 1:
+        add("The two power sources want different hibernate delays, but "
+            "systemd has only one. Applying will refuse.",
+            "idle.suspend", "idle.hibernate")
+    if lg["IdleAction"] != "ignore":
+        add("logind acts on idle too. It fights the ladder above.", "idle.logind")
+
+    dead, volatile = set(), set()
+    for src, rs in by_source.items():
+        if not (asleep := next(((t, a) for t, a in rs if a in policy.SLEEPS), None)):
+            continue
+        dead |= {policy.ROW[a] for t, a in rs if t > asleep[0]}
+        if src == policy.Source.BATTERY and not (
+                asleep[1] in policy.REACHES_DISK or policy.escalates(pol, src)):
+            volatile.add(policy.ROW[asleep[1]])
+    # The lid and button escalate by the same rule as the ladder, so losing
+    # the hibernate rung silently unprotects them too.
+    for rid, action in [("lid.close", pol["lid"]["battery"]),
+                        ("key.power", pol["button"]["power"]["battery"])]:
+        if action == policy.Action.SUSPEND and not policy.escalates(pol, "battery"):
+            volatile.add(rid)
+    if dead:
+        add("Scheduled after the machine is already asleep, so it never runs.",
+            *sorted(dead))
+    if volatile:
+        add("This suspend never reaches disk, so the battery can run flat.",
+            *sorted(volatile), "idle.hibernate")
+
+    if not st["hypridle"]:
+        add("hypridle is not running, so no idle action happens.",
+            "svc.hypridle", "idle.dim", "idle.lock")
+    for problem in problems(pol, st):
+        add(problem)
+    return out
+
+
+# Four things can disagree. hypridle reads its config once at startup, logind
+# caches its own until reloaded, TLP reasserts charge thresholds whenever it
+# restarts, and the hibernate delay lives in a systemd drop-in. [button.power]
+# and the low-battery ladder read the profile at event time, so they cannot
+# drift and are not checked.
 
 class Build:
     """Accumulates rows and the id -> (label, value) map the flags cite."""
@@ -236,119 +349,6 @@ def build(pol: dict, st: dict):
         ("TLP", tlp_sheets),
     ]
     return panels, flags(pol, st, b.shown), b.shown
-
-
-def flags(pol, st, shown):
-    """Static sentences. The values that triggered each one are rendered from
-    its deps, so nothing here interpolates."""
-    out = []
-    add = lambda text, *deps: out.append((text, [d for d in deps if d in shown]))
-    idle, lg = pol["idle"], st["logind"]
-
-    # Over the emitted listeners, not the raw policy: a hibernate that
-    # follows a suspend is dropped, because systemd performs that escalation.
-    by_source = {src: sorted((r.after, r.action) for r in policy.rungs(pol) if r.source == src)
-                 for src in policy.SOURCES}
-    if not any(a in policy.SLEEPS for rs in by_source.values() for _t, a in rs):
-        add("Never suspends or hibernates when idle. Stays awake until you close "
-            "the lid.",
-            "idle.suspend", "lid.close")
-    if cols := policy.collisions(pol):
-        add("Two actions fire at the same time. Order is up to hypridle.",
-            *sorted({policy.ROW[a] for _, _, acts in cols for a in acts}))
-    # Inverted: `ignore` is systemd's default and is correct. An action here
-    # would mean logind and hypridle both hold idle policy and race.
-    if len(policy.delay_gaps(pol)) > 1:
-        add("The two power sources want different hibernate delays, but "
-            "systemd has only one. Applying will refuse.",
-            "idle.suspend", "idle.hibernate")
-    if lg["IdleAction"] != "ignore":
-        add("logind acts on idle too. It fights the ladder above.", "idle.logind")
-
-    dead, volatile = set(), set()
-    for src, rs in by_source.items():
-        if not (asleep := next(((t, a) for t, a in rs if a in policy.SLEEPS), None)):
-            continue
-        dead |= {policy.ROW[a] for t, a in rs if t > asleep[0]}
-        if src == policy.Source.BATTERY and not (
-                asleep[1] in policy.REACHES_DISK or policy.escalates(pol, src)):
-            volatile.add(policy.ROW[asleep[1]])
-    # The lid and button escalate by the same rule as the ladder, so losing
-    # the hibernate rung silently unprotects them too.
-    for rid, action in [("lid.close", pol["lid"]["battery"]),
-                        ("key.power", pol["button"]["power"]["battery"])]:
-        if action == policy.Action.SUSPEND and not policy.escalates(pol, "battery"):
-            volatile.add(rid)
-    if dead:
-        add("Scheduled after the machine is already asleep, so it never runs.",
-            *sorted(dead))
-    if volatile:
-        add("This suspend never reaches disk, so the battery can run flat.",
-            *sorted(volatile), "idle.hibernate")
-
-    if not st["hypridle"]:
-        add("hypridle is not running, so no idle action happens.",
-            "svc.hypridle", "idle.dim", "idle.lock")
-    for problem in problems(pol, st):
-        add(problem)
-    return out
-
-
-# Four things can disagree. hypridle reads its config once at startup, logind
-# caches its own until reloaded, TLP reasserts charge thresholds whenever it
-# restarts, and the hibernate delay lives in a systemd drop-in. [button.power]
-# and the low-battery ladder read the profile at event time, so they cannot
-# drift and are not checked.
-
-LID_ROW = {"HandleLidSwitchExternalPower": "lid.close",
-           "HandleLidSwitch": "lid.close",
-           "HandleLidSwitchDocked": "lid.docked"}
-
-CHARGE_ROW = (("start", "charge_start", "chg.start"),
-              ("stop", "charge_stop", "chg.stop"))
-
-
-def lid_drift(pol: dict, st: dict) -> list[Drift]:
-    want = policy.logind_want(pol)
-    return [Drift(LID_ROW[prop], prop, st["logind"][prop], v)
-            for prop, v in want.items() if st["logind"][prop] != v]
-
-
-def charge_drift(pol: dict, st: dict) -> list[Drift]:
-    return [Drift(rid, key, st[key], pol["battery"]["charge"][name])
-            for name, key, rid in CHARGE_ROW
-            if st[key] != pol["battery"]["charge"][name]]
-
-
-def pending(pol: dict, st: dict) -> list[Pending]:
-    live = policy.parse_generated(st["live_hypridle"]) if st["live_hypridle"] else {}
-    want = {(r.source, r.action): r.after for r in policy.rungs(pol)}
-    rows: dict[str, tuple] = {}
-    for key in sorted(set(want) | set(live)):
-        if want.get(key) != live.get(key):
-            rid = policy.ROW[key[1]]
-            rows.setdefault(rid, Pending(rid, secs(live.get(key)),
-                                         secs(want.get(key)), False))
-    out = list(rows.values())
-    out += [Pending(d.row, d.have, d.want, True) for d in lid_drift(pol, st)]
-    out += [Pending(d.row, f"{d.have}%", f"{d.want}%", True)
-            for d in charge_drift(pol, st)]
-    return out
-
-
-def problems(pol: dict, st: dict) -> list[str]:
-    out = []
-    if st["live_hypridle"] is None:
-        out.append("Generated config is missing. Apply to write it.")
-    elif st["live_hypridle"] != st["want_hypridle"]:
-        out.append("Generated config is out of date. Apply to update it.")
-    if lid_drift(pol, st):
-        out.append("Lid action in logind does not match the profile. Apply to fix.")
-    if charge_drift(pol, st):
-        out.append("Charge thresholds do not match the profile. Apply to fix.")
-    if policy.sleep_text(pol) != st["live_sleep"]:
-        out.append("Hibernate delay in systemd does not match the profile. Apply to fix.")
-    return out
 
 
 EDITABLE: dict[tuple[str, int], tuple[str, ...]] = {

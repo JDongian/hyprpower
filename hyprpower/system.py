@@ -126,7 +126,7 @@ def save(path: tuple[str, ...], value) -> None:
     tomlkit, not tomllib+dump: the profile carries the reasoning for most of
     its values and a plain TOML writer would delete every comment.
     """
-    import tomlkit
+    import tomlkit   # deferred: ~30ms, and only an edit ever needs it
 
     # resolve() so a symlinked profile is written THROUGH, not replaced: an
     # atomic rename onto the link would swap it for a regular file and edits
@@ -226,12 +226,12 @@ class Service(NamedTuple):
     user: bool              # a --user unit rather than a system one
 
 
-SERVICES = [Service("hypridle", "hypridle", True),
+SERVICES = (Service("hypridle", "hypridle", True),
             Service("tlp", "tlp", False),
             Service("upower", "upower", False),
             Service("acpid", "acpid", False),
             Service("thermald", "thermald", False),
-            Service("hibernate-on-low-battery.timer", None, False)]
+            Service("hibernate-on-low-battery.timer", None, False))
 
 
 def read(pol: dict) -> dict:
