@@ -1,10 +1,10 @@
-# thinkpower
+# hyprpower
 
 Every power setting on a Linux laptop in one table, next to what macOS and
 Windows would do by default.
 
 ```
-thinkpower
+hyprpower
 ```
 
 Reads the running system — never a config source, so it works with or without

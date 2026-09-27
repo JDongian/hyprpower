@@ -1,4 +1,4 @@
-# thinkpower policy — the single source of truth for what this laptop does.
+# hyprpower policy — the single source of truth for what this laptop does.
 #
 # Everything is "on TRIGGER, if on AC or on battery, do ACTION". The daemons
 # are dispatchers; none of them owns a decision:
@@ -13,7 +13,7 @@
 # "2m30s", "10m". false = never.
 #
 # Not here: CPU governor, charge start/stop thresholds, device runtime PM.
-# TLP owns those and thinkpower only reads them.
+# TLP owns those and hyprpower only reads them.
 
 [display]
 # What "dim" means. MUST carry a unit: brightnessctl reads a bare 10 as a raw
@@ -46,6 +46,18 @@ battery = "2m1s"
 ac      = false        # plugged in: stay reachable
 battery = "10m"
 
+# Set both and they compose: the machine suspends at the first time and
+# systemd hibernates it at the second, via suspend-then-hibernate and an RTC
+# alarm. "Hibernate after N" means the same thing either way -- be hibernated
+# by N of idle. Set only hibernate to go straight to disk.
+#
+# The gap between them becomes HibernateDelaySec, which systemd keeps in one
+# global setting: it cannot differ by power source, and it also governs the
+# suspend-then-hibernate that [lid] asks for.
+[idle.hibernate]
+ac      = false
+battery = "20m"
+
 # Three mutually exclusive conditions, not a power-source split. "docked"
 # means an external display or dock is attached — NOT merely plugged in —
 # and it wins over the other two when present.
@@ -65,8 +77,9 @@ battery = "ignore"
 # Charging limits. Absolute, not power-source dependent. Taken over from
 # TLP (START/STOP_CHARGE_THRESH_BAT0) so they can be changed here.
 [battery.charge]
-start = 40     # begin charging only below this
-stop  = 100     # stop charging at this
+start = 70     # begin charging only below this
+stop  = 80     # stop charging at this: holding 100% ages the cell faster,
+               # and this laptop mostly lives plugged in
 
 # What happens as the battery drains. Trigger is charge level, not time, and
 # only applies on battery by definition.

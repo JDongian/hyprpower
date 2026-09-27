@@ -19,9 +19,9 @@ become dispatchers that own no decisions.
 
 ## Division of labour
 
-**Nix installs and routes. thinkpower decides.**
+**Nix installs and routes. hyprpower decides.**
 
-| | Nix | thinkpower |
+| | Nix | hyprpower |
 |---|---|---|
 | packages, service enables | ✓ | |
 | swap, resume device, fprintd sleep hooks, udev | ✓ (hardware, not policy) | |
@@ -39,15 +39,15 @@ the machine does when you walk away?* If yes, it is policy and lives in
 |---|---|---|
 | `[idle.*]` | generated `hypridle.conf`, one listener per rung per source, split with `condition_cmd` | hypridle is the only thing watching idle; `condition_retry` re-checks while idle, so unplugging mid-idle is handled natively |
 | `[lid]` | logind drop-in | logind splits the lid natively and integrates with inhibitors |
-| `[button.power]` | acpid → `thinkpower event power` | logind has no power-source variant for keys; Windows has one, logind does not |
-| `[charge]` | systemd timer → `thinkpower event charge` | must keep running with no session |
+| `[button.power]` | acpid → `hyprpower event power` | logind has no power-source variant for keys; Windows has one, logind does not |
+| `[charge]` | systemd timer → `hyprpower event charge` | must keep running with no session |
 
 Generated artefacts, never hand-edited:
 
 ```
-~/.local/state/thinkpower/hypridle.conf
-~/.config/systemd/user/hypridle.service.d/thinkpower.conf   # points hypridle at it
-/etc/systemd/logind.conf.d/50-thinkpower.conf               # lid + HandlePowerKey=ignore
+~/.local/state/hyprpower/hypridle.conf
+~/.config/systemd/user/hypridle.service.d/hyprpower.conf   # points hypridle at it
+/etc/systemd/logind.conf.d/50-hyprpower.conf               # lid + HandlePowerKey=ignore
 ```
 
 `~/.config/systemd/user/` is a real writable directory (home-manager only
@@ -57,7 +57,7 @@ all. That removes what was previously the riskiest step in the plan.
 ## Code
 
 ```
-thinkpower/
+hyprpower/
   probe.py    read the live system            (done)
   config.py   load policy + presets, parse durations
   view.py     merge policy + probe + presets -> display model
@@ -86,9 +86,9 @@ every row, so the display can show policy, live, and whether they agree.
 
 Reproducibility moves. `nixos-rebuild` on a fresh machine reproduces
 plumbing, not behaviour; behaviour comes from `policy.toml` plus
-`thinkpower apply`. That is only equivalent to today if the config is
+`hyprpower apply`. That is only equivalent to today if the config is
 git-tracked and apply is idempotent — both are required, not optional.
 
-`/etc/systemd/logind.conf.d/50-thinkpower.conf` is imperative state outside
+`/etc/systemd/logind.conf.d/50-hyprpower.conf` is imperative state outside
 the store. Nix will neither create nor remove it. Nix must therefore not also
 set logind lid/power-key values, or the two will fight silently.

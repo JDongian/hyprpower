@@ -27,10 +27,10 @@ def runtime_dir() -> Path:
     hypridle's rungs run as the user; the low-battery handler runs as root.
     If they kept separate files, root could save the already-dimmed value and
     "restore" you to 10% -- the same single-slot bug, across the uid boundary.
-    /run/thinkpower is reachable from both."""
-    d = Path("/run/thinkpower")
+    /run/hyprpower is reachable from both."""
+    d = Path("/run/hyprpower")
     if not d.exists():
-        d.mkdir(parents=True, exist_ok=True)
+        d.mkdir()
         os.chmod(d, 0o1777)   # sticky, like /tmp: either uid may write its own
     return d
 
@@ -55,17 +55,16 @@ def save_brightness() -> None:
 
 
 def cmd_on(source: str) -> int:
+    assert source in ("ac", "battery"), source
     return 0 if (source == "ac") == on_ac() else 1
 
 
 def cmd_do(action: str) -> int:
     pol = policy.load()
-    if action == "dim":
+    if action in ("dim", "backlight-off"):
         save_brightness()
-        sh("brightnessctl", "--quiet", "set", pol["display"]["dim_to"])
-    elif action == "backlight-off":
-        save_brightness()
-        sh("brightnessctl", "--quiet", "set", "0")
+        sh("brightnessctl", "--quiet", "set",
+           pol["display"]["dim_to"] if action == "dim" else "0")
     elif action == "display-off":
         # Opt-in only: a dpms-off listener crashed the whole Hyprland session
         # on 0.55.x (SIGABRT -> greetd relogin). policy defaults off_method to
@@ -73,10 +72,9 @@ def cmd_do(action: str) -> int:
         sh("hyprctl", "dispatch", "dpms", "off")
     elif action == "lock":
         sh("loginctl", "lock-session")
-    elif action == "suspend":
-        sh("systemctl", "suspend")
+    elif action in ("suspend", "hibernate", "suspend-then-hibernate"):
+        sh("systemctl", action)
     elif action == "restore":
-        # Legitimately absent when nothing dimmed; not an error.
         if saved().exists():
             sh("brightnessctl", "--quiet", "set", saved().read_text().strip())
             saved().unlink()

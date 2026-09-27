@@ -1,4 +1,4 @@
-# macOS defaults for a MacBook (Sonoma/Sequoia). Reference only — thinkpower
+# macOS defaults for a MacBook (Sonoma/Sequoia). Reference only — hyprpower
 # never applies a preset directly; copy it to policy.toml and edit.
 #
 # macOS anchors everything on display-off: the backlight fades ~15s before it

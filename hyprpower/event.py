@@ -18,14 +18,13 @@ from . import act, policy
 # progress". Observed 2026-09-26.
 DEBOUNCE_SECONDS = 3
 
-ACTIONS = {
-    "suspend": ["systemctl", "suspend"],
-    "hibernate": ["systemctl", "hibernate"],
-    "suspend-then-hibernate": ["systemctl", "suspend-then-hibernate"],
-    "poweroff": ["systemctl", "poweroff"],
-    "lock": ["loginctl", "lock-sessions"],
-    "ignore": None,
-}
+ACTIONS = {a: ["systemctl", a] for a in
+           ("suspend", "hibernate", "suspend-then-hibernate", "poweroff")}
+ACTIONS |= {"lock": ["loginctl", "lock-sessions"], "ignore": None}
+
+
+def latch() -> Path:
+    return act.runtime_dir() / "low-battery"
 
 
 def debounced(name: str, seconds: int = DEBOUNCE_SECONDS) -> bool:
@@ -38,11 +37,10 @@ def debounced(name: str, seconds: int = DEBOUNCE_SECONDS) -> bool:
 
 
 def run_action(name: str) -> None:
-    cmd = ACTIONS.get(name)
-    if cmd is None and name not in ACTIONS:
+    if name not in ACTIONS:
         raise SystemExit(f"unknown action in policy: {name}")
-    if cmd:
-        subprocess.run(cmd, check=False)
+    if cmd := ACTIONS[name]:            # "ignore" maps to None on purpose
+        subprocess.run(cmd, check=True)
 
 
 def source() -> str:
@@ -59,35 +57,28 @@ def ev_power() -> int:
 def ev_charge() -> int:
     """The low-battery ladder, over descending charge.
 
-    Ported from the hand-written script in power.nix, with two changes: the
-    thresholds come from policy.toml, and the brightness save goes through
-    act so it cannot clobber a save the idle ladder already made.
+    The brightness save goes through act so it cannot clobber a save the
+    idle ladder already made.
     """
     pol = policy.load()["battery"]["low"]
-    if act.on_ac():
-        _recover()
-        return 0
     cap = int(Path("/sys/class/power_supply/BAT0/capacity").read_text())
-    if cap > pol["backlight_off"]:
+    if act.on_ac() or cap > pol["backlight_off"]:
         _recover()
         return 0
     if cap <= pol["hibernate"]:
-        # Fall back rather than doing nothing: a refused hibernate must not
-        # leave a flat battery awake.
+        # The one deliberate fallback here: a refused hibernate must not
+        # leave a nearly-flat battery awake.
         if subprocess.run(["systemctl", "hibernate"], check=False).returncode:
-            subprocess.run(["systemctl", "suspend"], check=False)
+            subprocess.run(["systemctl", "suspend"], check=True)
         return 0
-    # Between the two thresholds: park the screen, once, and keep polling.
-    latch = act.runtime_dir() / "low-battery"
-    if not latch.exists():
-        latch.touch()
-        subprocess.run(["loginctl", "lock-sessions"], check=False)
+    if not latch().exists():
+        latch().touch()
+        subprocess.run(["loginctl", "lock-sessions"], check=True)
         act.cmd_do("backlight-off")
     return 0
 
 
 def _recover() -> None:
-    latch = act.runtime_dir() / "low-battery"
-    if latch.exists():
-        latch.unlink()
+    if latch().exists():
+        latch().unlink()
         act.cmd_do("restore")

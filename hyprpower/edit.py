@@ -11,11 +11,11 @@ import tomlkit
 
 from . import policy
 
-# (row id, column index) -> path into policy.toml. Columns are
-# [plugged in, on battery], so a two-column row maps to two paths.
+# Column index is the power source: 0 = plugged in, 1 = on battery.
 EDITABLE: dict[tuple[str, int], tuple[str, ...]] = {
     **{(f"idle.{k}", i): ("idle", k, src)
-       for k in ("dim", "backlight_off", "display_off", "lock", "suspend")
+       for k in ("dim", "backlight_off", "display_off", "lock", "suspend",
+                 "hibernate")
        for i, src in enumerate(("ac", "battery"))},
     ("lid.close", 0): ("lid", "ac"),
     ("lid.close", 1): ("lid", "battery"),
@@ -60,8 +60,6 @@ def write(path: tuple[str, ...], value) -> None:
     for key in path[:-1]:
         node = node[key]
     node[path[-1]] = value
-    # Write via a temp file in the same directory so a crash mid-write cannot
-    # leave a truncated policy: this file drives what the laptop does.
     tmp = file.with_suffix(".toml.tmp")
     tmp.write_text(tomlkit.dumps(doc))
     tmp.replace(file)

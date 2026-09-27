@@ -3,14 +3,14 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "thinkpower"
+name = "hyprpower"
 version = "0.1.0"
 description = "See every power setting on a Linux laptop in one place, next to what macOS and Windows would do."
 requires-python = ">=3.11"
 dependencies = ["textual>=0.80"]
 
 [project.scripts]
-thinkpower = "thinkpower.cli:main"
+hyprpower = "hyprpower.cli:main"
 
 [tool.setuptools]
-packages = ["thinkpower"]
+packages = ["hyprpower"]

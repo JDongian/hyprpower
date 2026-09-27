@@ -14,6 +14,7 @@ from __future__ import annotations
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Vertical, VerticalScroll
+from textual.coordinate import Coordinate
 from textual.widgets import (DataTable, Footer, Input, Label, ListItem,
                              ListView, Static, TabbedContent, TabPane)
 
@@ -47,20 +48,19 @@ class ThinkPower(App):
     def __init__(self) -> None:
         super().__init__()
         self.panels, self.flags, self.shown = build()
-        # row id -> (in force, wanted, needs root); marks rows GParted-style
+        # Marks modified rows GParted-style.
         self.pending = {rid: rest for rid, *rest in
                         ((p[0], p[1], p[2], p[3]) for p in pending())}
         self.problems = problems()
-        # row id -> [(table, row key, label)], one entry per place the row is
-        # drawn; the same id appears once per system sub-tab.
+        # One entry per place a row is drawn: the same id appears once per
+        # system sub-tab.
         self._rows: dict[str, list[tuple[DataTable, str, str]]] = {}
         self._labels: list[Label] = []
         # Remembered across recompose: an edit that dumped you back on tab 1
         # made editing several values in a row miserable.
         self._active_tab: str | None = None
         self._system_index: int = 0
-        # row id -> tab ids it appears on, so a selection can mark the tabs
-        # that hold its evidence without you having to hunt for them.
+        # So selecting a flag can mark the tabs holding its evidence.
         self._row_tabs: dict[str, set[str]] = {}
         self._titles: dict[str, str] = {}
         self._selected: int | None = None
@@ -109,6 +109,12 @@ class ThinkPower(App):
 
     def on_mount(self) -> None:
         self.query_one("#flags", ListView).focus()
+
+    def on_data_table_cell_highlighted(self, event) -> None:
+        """Column 0 is the row label -- never a value, never editable, so the
+        cursor bounces off it instead of stopping there."""
+        if event.coordinate.column == 0:
+            event.data_table.cursor_coordinate = Coordinate(event.coordinate.row, 1)
 
     def action_reload(self) -> None:
         """Re-read everything: probe the system again and re-read policy.toml.
@@ -189,15 +195,22 @@ class ThinkPower(App):
     def _do_apply(self, confirmed: bool | None) -> None:
         if not confirmed:
             return
-        from .apply import apply_session
+        from .apply import apply_session, hyprpower_exe
+        import subprocess
+        root = any(r for _, _, r in self.pending.values())
+        if root:
+            # Before apply_session, not after: a declined password used to
+            # leave the session half applied and the system half not.
+            # Cached from startup, so this normally does not prompt; drop the
+            # alt screen anyway in case the credential has since timed out.
+            with self.suspend():
+                print("\nApplying system settings (logind, charge thresholds)...")
+                rc = subprocess.run(["sudo", hyprpower_exe(), "apply", "--system"]).returncode
+            if rc:
+                self.notify(f"nothing applied (sudo exit {rc})", severity="error")
+                return
         apply_session()
-        if any(root for _, _, root in self.pending.values()):
-            # The logind drop-in needs root. Do not prompt for a password
-            # inside a full-screen TUI; say what to run instead.
-            self.notify("session applied. For the lid, run: "
-                        "sudo thinkpower apply --system", timeout=10)
-        else:
-            self.notify("applied")
+        self.notify("applied (system + session)" if root else "applied")
         self.action_reload()
 
     def action_edit(self) -> None:
@@ -244,7 +257,7 @@ class ThinkPower(App):
         self._mark_tabs(deps)
 
     def _mark_tabs(self, deps: set[str]) -> None:
-        affected = {t for rid in deps for t in self._row_tabs.get(rid, ())}
+        affected = {t for rid in deps for t in self._row_tabs[rid]}
         tabs = self.query_one("#main", TabbedContent)
         for tab_id, title in self._titles.items():
             tab = tabs.get_tab(tab_id)
@@ -253,6 +266,20 @@ class ThinkPower(App):
 
 
 def main() -> None:
+    # Up front, not at apply time: the TUI itself stays unprivileged (it must
+    # write ~/.config and drive the user's hypridle), but applying needs root
+    # for the logind drop-in and the charge thresholds. Caching the credential
+    # here means the apply never stops to ask.
+    import os, subprocess, sys
+    if os.geteuid() == 0:
+        print("run hyprpower as your own user, not root: as root there is no "
+              "user bus, so hypridle cannot be read or restarted. It escalates "
+              "on its own for the parts that need it.", file=sys.stderr)
+        raise SystemExit(1)
+    if rc := subprocess.run(["sudo", "-v"]).returncode:
+        print("sudo is required: applying writes /etc/systemd/logind.conf.d "
+              "and battery sysfs", file=sys.stderr)
+        raise SystemExit(rc)
     ThinkPower().run()
 
 

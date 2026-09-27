@@ -16,11 +16,20 @@ from . import apply, policy, probe
 SYSTEMS = ("this machine", "macOS", "Windows")
 ONE, TWO = [""], ["Plugged in", "On battery"]
 NEVER, VARIES, ON_SUSPEND = "never", "varies", "on suspend"
+
+# (row label, policy key, macOS ac/bat, Windows ac/bat). Module level so the
+# flags can cite a rung by the label the UI actually shows.
+LADDER = [("Dim display after", "dim", (585, 105), (300, 120)),
+          ("Turn off backlight after", "backlight_off", (600, 120), (300, 180)),
+          ("Turn off display after", "display_off", (None, None), (None, None)),
+          ("Lock after", "lock", (600, 120), (ON_SUSPEND, ON_SUSPEND)),
+          ("Suspend after", "suspend", (NEVER, VARIES), (900, 600)),
+          ("Hibernate after", "hibernate", (10800, 10800), (NEVER, VARIES))]
+LABEL = {key: label for label, key, _m, _w in LADDER}
 RATE_LABEL = {"Discharging": "Discharge rate", "Charging": "Charge rate"}
 
-# TLP has ~59 settings. Group by what each controls, ordered by how much it
-# shapes battery life; vendor-irrelevant ones last.
-# Order matters: most consequential first.
+# TLP has ~59 settings. Grouped by what each controls, most consequential
+# first; vendor-irrelevant ones last.
 TLP_GROUPS = [
     ("Charging policy", ("START_CHARGE", "STOP_CHARGE", "RESTORE_THRESHOLDS")),
     ("CPU and platform", ("CPU_", "PLATFORM_PROFILE", "NMI_")),
@@ -66,7 +75,9 @@ class Build:
         cells = {"this machine": [str(v) for v in values],
                  "macOS": [str(v) for v in fill(mac if mac is not None else "—")],
                  "Windows": [str(v) for v in fill(win if win is not None else "—")]}
-        self.shown[rid] = (label, cells["this machine"][0])
+        # Every column, not just the first: a flag about the battery column
+        # was citing the plugged-in value.
+        self.shown[rid] = (label, " / ".join(cells["this machine"]))
         return (rid, label, cells, detail)
 
 
@@ -93,12 +104,16 @@ def build(pol: dict | None = None, st: dict | None = None):
           [f'{st["bl_now"]}/{st["bl_max"]} ({100 * st["bl_now"] / st["bl_max"]:.0f}%)']),
         r("now.cycles", "Cycle count", [st["cycles"]]),
         r("now.health", "Battery health",
-          [f'{health:.1f}%  ({st["energy_full"]:.1f}/{st["energy_design"]:.1f} Wh)']),
+          [f'{health:.1f}%  ({st["energy_full"]:.1f}/{st["energy_design"]:.1f} Wh)'],
+          detail=("energy_full is what the gauge last learned, and relearning "
+                  "needs charge counted from full all the way down to empty -- "
+                  "a full charge alone does not do it. Near-design capacity at "
+                  "a high cycle count means the design figure, not a "
+                  "measurement.")),
         None,
-        r("now.bluetooth", "Bluetooth", [st["radios"].get("bluetooth", "—")]),
-        r("now.wlan", "Wi-Fi", [st["radios"].get("wlan", "—")]),
+        r("now.bluetooth", "Bluetooth", [st["radios"]["bluetooth"]]),
+        r("now.wlan", "Wi-Fi", [st["radios"]["wlan"]]),
         # The ladder in Power management is only real while this is running.
-        # None means the user bus was unreachable, which is not "stopped".
     ]
 
     # --- 1b. System ------------------------------------------------------
@@ -118,7 +133,7 @@ def build(pol: dict | None = None, st: dict | None = None):
     ]
     for unit, active, version in st["services"]:
         system.append(r(f"svc.{unit}", unit,
-                        [{True: "running", False: "stopped"}.get(active, "unknown")
+                        [("running" if active else "stopped")
                          + (f"   v{version}" if version else "")]))
 
     # --- 2. Hardware -----------------------------------------------------
@@ -141,12 +156,6 @@ def build(pol: dict | None = None, st: dict | None = None):
     ]
 
     # --- 3. Power management --------------------------------------------
-    # (label, policy key, macOS ac/bat, Windows ac/bat)
-    LADDER = [("Dim display after", "dim", (585, 105), (300, 120)),
-              ("Turn off backlight after", "backlight_off", (600, 120), (300, 180)),
-              ("Turn off display after", "display_off", (None, None), (None, None)),
-              ("Lock after", "lock", (600, 120), (ON_SUSPEND, ON_SUSPEND)),
-              ("Suspend after", "suspend", (NEVER, VARIES), (900, 600))]
     ladder = []
     for label, key, mac, win in LADDER:
         detail = None
@@ -158,7 +167,6 @@ def build(pol: dict | None = None, st: dict | None = None):
                         [secs(idle[key]["ac"]), secs(idle[key]["battery"])],
                         mac=[secs(m) for m in mac], win=[secs(w) for w in win],
                         detail=detail))
-
     ch, chg = pol["battery"]["low"], pol["battery"]["charge"]
     charge = [
         r("low.screen_off", "Turn off backlight + lock at",
@@ -213,64 +221,52 @@ def build(pol: dict | None = None, st: dict | None = None):
                               ("Idle, system-wide (logind)", ONE, logind_rows)], True),
         ("TLP", tlp_sheets, False),
     ]
-    return panels, flags(pol, st, b.shown, health), b.shown
+    return panels, flags(pol, st, b.shown), b.shown
 
 
-def flags(pol, st, shown, health):
+def flags(pol, st, shown):
+    """Static sentences. The values that triggered each one are rendered from
+    its deps, so nothing here interpolates."""
     out = []
     add = lambda text, *deps: out.append((text, [d for d in deps if d in shown]))
     idle, lg = pol["idle"], st["logind"]
 
-    # No flag for display_off = never. It is a deliberate choice: dpms off
-    # crashed the whole Hyprland session on 0.55.x, and on this ladder the
-    # saving is ~0.13 Wh (the 2m->10m window on battery). The row still shows
-    # "never"; it just is not a finding.
-    if not idle["suspend"]["ac"] and not idle["suspend"]["battery"]:
-        add("Never suspends on idle; awake until the lid closes.",
+    # Over the composed listeners, not the raw policy: suspend + hibernate
+    # fold into one suspend-then-hibernate, which does reach disk.
+    by_source = {src: sorted((t, a) for t, s_, a, _ in policy.rungs(pol) if s_ == src)
+                 for src in policy.SOURCES}
+    if not any(a in policy.SLEEP for rs in by_source.values() for _t, a in rs):
+        add("Never sleeps when idle. Stays awake until you close the lid.",
             "idle.suspend", "lid.close")
-    # One rule, not one flag per occurrence: the finding is "two actions are
-    # scheduled at the same moment", and the instances are its evidence.
     if cols := policy.collisions(pol):
-        where = "; ".join(f"{' and '.join(a)} at {secs(t)} on {src}"
-                          for t, src, a in cols)
-        deps = sorted({f"idle.{a.replace('-', '_')}"
-                       for _, _, acts in cols for a in acts})
-        add(f"Actions scheduled at the same moment run in an undefined order "
-            f"({where}).", *deps)
-    if health > 95 and st["charge_stop"] < 100:
-        add("Health is unproven: charging stops short of full, so the gauge may "
-            "never have recalibrated.", "now.health", "tlp.cstop")
-    # Inverted: `ignore` is correct and is systemd's default. A real action
-    # here would be the finding — logind and hypridle would BOTH hold idle
-    # policy and race. (logind could not act anyway: IdleHint is never set on
-    # this Wayland session, so it never sees the machine as idle.)
+        add("Two actions fire at the same time. Order is up to hypridle.",
+            *sorted({policy.ROW[a] for _, _, acts in cols for a in acts}))
+    # Inverted: `ignore` is systemd's default and is correct. An action here
+    # would mean logind and hypridle both hold idle policy and race.
     if lg["IdleAction"] != "ignore":
-        add(f"logind has its own idle action ({lg['IdleAction']} after "
-            f"{secs(lg['IdleActionUSec'])}), competing with the idle ladder.",
-            "idle.logind")
+        add("logind acts on idle too. It fights the ladder above.", "idle.logind")
+
+    dead, volatile = set(), set()
+    for rs in by_source.values():
+        if not (asleep := next(((t, a) for t, a in rs if a in policy.SLEEP), None)):
+            continue
+        dead |= {policy.ROW[a] for t, a in rs if t > asleep[0]}
+        if not policy.SLEEP[asleep[1]]:
+            volatile.add(policy.ROW[asleep[1]])
+    if dead:
+        add("Scheduled after the machine is already asleep, so it never runs.",
+            *sorted(dead))
+    if volatile:
+        add("This sleep never reaches disk, so the battery can run flat.",
+            *sorted(volatile), "idle.hibernate")
+
     if st["suspend_mode"] == "s2idle" and "deep" in st["suspend_modes"]:
-        # TODO benchmark this rather than trusting the claim. s2idle drain is
-        # platform-dependent and Whiskey Lake S0ix is reportedly weak, but
-        # that is hearsay until measured on this machine:
-        #   1. on battery, read /sys/class/power_supply/BAT0/energy_now
-        #   2. suspend for a measured hour, resume, read it again
-        #   3. `echo deep | sudo tee /sys/power/mem_sleep` (resets on reboot)
-        #   4. repeat identically
-        # Same duration and starting charge both times, nothing plugged in.
-        # If deep wins: boot.kernelParams = [ "mem_sleep_default=deep" ].
-        add("Suspend uses s2idle; deep (S3) is also supported and has not been "
-            "measured on this machine.", "susp.mode", "susp.all")
-    # The ladder is only real if its daemon is alive; without this the UI
-    # shows policy as though it were in force. Dropped in the rewrite.
-    if st["hypridle"] is False:
-        add("hypridle is not running, so none of the idle ladder is in effect.",
+        add("Suspend uses s2idle. deep is available but untested here.",
+            "susp.mode", "susp.all")
+    if not st["hypridle"]:
+        add("hypridle is not running, so no idle action happens.",
             "svc.hypridle", "idle.dim", "idle.lock")
-    # The UI presents policy.toml as the truth, so say when it is not applied.
     from .verify import problems
     for problem in problems(pol):
         add(problem)
-    # No flag for radios staying up on battery. TLP can drop them when idle
-    # (DEVICES_TO_DISABLE_ON_BAT_NOT_IN_USE) but Wi-Fi is always in use and
-    # an idle Bluetooth controller is ~5-25mW: under 0.4% of this battery
-    # over a full discharge. Detectable, not meaningful.
     return out

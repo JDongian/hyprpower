@@ -1,8 +1,8 @@
 """Read the system. Only things policy.toml does NOT own.
 
-Anything thinkpower declares is read from policy.toml, not guessed from the
+Anything hyprpower declares is read from policy.toml, not guessed from the
 machine -- an earlier version reverse-engineered the idle ladder out of
-hypridle's config file and broke the moment thinkpower started generating
+hypridle's config file and broke the moment hyprpower started generating
 that file itself.
 
 FAIL FAST. Nothing here catches exceptions. If a tool is missing or a sysfs
@@ -67,11 +67,19 @@ def on_ac() -> bool:
     return bool(int(first("/sys/class/power_supply/A*/online")))
 
 
-def unit_active(unit: str, user: bool = False) -> bool | None:
-    """True/False only for a real answer; None if the bus was unreachable."""
+def unit_active(unit: str, user: bool = False) -> bool:
+    """is-active exits non-zero for a stopped unit, so the return code cannot
+    be used; parse the word. An unrecognised answer means we could not reach
+    the manager at all, which is a failure, not "stopped"."""
     cmd = ["systemctl"] + (["--user"] if user else []) + ["is-active", unit]
     out = subprocess.run(cmd, capture_output=True, text=True).stdout.strip()
-    return {"active": True, "inactive": False, "failed": False}.get(out)
+    if out not in ("active", "inactive", "failed", "activating", "deactivating"):
+        raise SystemExit(f"cannot determine state of {unit}: {out!r} — no user "
+                         f"bus (XDG_RUNTIME_DIR is "
+                         f"{os.environ.get('XDG_RUNTIME_DIR', 'unset')})"
+                         if user else
+                         f"cannot determine state of {unit}: {out!r}")
+    return out == "active"
 
 
 SERVICES = [("hypridle", "hypridle", True), ("tlp", "tlp", False),
@@ -120,11 +128,7 @@ def state() -> dict:
                      for u, b, user in SERVICES],
         "hyprland_version": pkg_version("Hyprland"),
         "logind": logind(),
-        # True/False only when the answer is real; None means the user bus
-        # could not be reached, which is not the same as "not running".
-        "hypridle": {"active": True, "inactive": False, "failed": False}.get(
-            subprocess.run(["systemctl", "--user", "is-active", "hypridle.service"],
-                           capture_output=True, text=True).stdout.strip()),
+        "hypridle": unit_active("hypridle.service", user=True),
         "tlp_set": {k: v for s, k, v in tlp_rows if not s.endswith("defaults.conf")},
         "tlp_all": tlp_conf,
         "tlp_pairs": {k[:-6]: (v, tlp_conf.get(k[:-6] + "_ON_BAT"))
