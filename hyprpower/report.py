@@ -1,17 +1,17 @@
-"""Build the display: check configs, check system, lay them out.
+"""Everything shown, and everything concluded. PURE.
 
-Policy-owned settings come from policy.toml — it IS the truth, so there is
-no "declared vs live" column. Everything else is read from the machine.
-Where the two could disagree (see verify.py) that is an error, not a status.
+Takes a policy and one machine snapshot and returns rows, flags and drift.
+It never reads the machine itself -- an earlier version let the view fetch
+its own state by default, and that is where purity eroded.
 
-Layout, preserved deliberately: four tabs, sub-tabs per system where a
-comparison exists, and two columns only where a setting genuinely differs by
-power source.
+Policy-owned settings come from the profile: it IS the truth, so there is no
+"declared vs live" column. Where the two could disagree that is drift, and
+drift is a flag rather than a column.
 """
 
 from __future__ import annotations
 
-from . import apply, policy, probe
+from . import policy
 
 ONE, TWO = [""], ["Plugged in", "On battery"]
 
@@ -75,9 +75,7 @@ class Build:
         return (rid, label, cells, detail)
 
 
-def build(pol: dict | None = None, st: dict | None = None):
-    pol = pol or policy.load()
-    st = st or probe.state()
+def build(pol: dict, st: dict):
     b = Build(pol, st)
     r, lg = b.row, st["logind"]
     idle, disp = pol["idle"], pol["display"]
@@ -120,9 +118,9 @@ def build(pol: dict | None = None, st: dict | None = None):
         # Make the chain visible: policy is the source, the generated config
         # is the artifact, hypridle is what enforces it. A "stale config"
         # flag referring to a file the UI never showed was just confusing.
-        r("sys.policy", "Policy file", [str(policy.path())]),
+        r("sys.policy", "Profile", [st["profile"]]),
         r("sys.generated", "Idle config (generated)",
-          [f'{apply.state_dir() / "hypridle.conf"}']),
+          [st["generated"]]),
         None,
     ]
     for unit, active, version in st["services"]:
@@ -269,7 +267,103 @@ def flags(pol, st, shown):
     if not st["hypridle"]:
         add("hypridle is not running, so no idle action happens.",
             "svc.hypridle", "idle.dim", "idle.lock")
-    from .verify import problems
-    for problem in problems(pol):
+    for problem in problems(pol, st):
         add(problem)
     return out
+
+
+# --- drift: declared vs in force -------------------------------------------
+# Four things can disagree. hypridle reads its config once at startup, logind
+# caches its own until reloaded, TLP reasserts charge thresholds whenever it
+# restarts, and the hibernate delay lives in a systemd drop-in. [button.power]
+# and the low-battery ladder read the profile at event time, so they cannot
+# drift and are not checked.
+
+LID_ROW = {"HandleLidSwitchExternalPower": "lid.close",
+           "HandleLidSwitch": "lid.close",
+           "HandleLidSwitchDocked": "lid.docked"}
+
+CHARGE_ROW = (("start", "charge_start", "chg.start"),
+              ("stop", "charge_stop", "chg.stop"))
+
+
+def lid_drift(pol: dict, st: dict) -> list[tuple[str, str, str, str]]:
+    want = policy.logind_want(pol)
+    return [(LID_ROW[prop], prop, st["logind"][prop], v)
+            for prop, v in want.items() if st["logind"][prop] != v]
+
+
+def charge_drift(pol: dict, st: dict) -> list[tuple[str, int, int]]:
+    return [(rid, st[key], pol["battery"]["charge"][name])
+            for name, key, rid in CHARGE_ROW
+            if st[key] != pol["battery"]["charge"][name]]
+
+
+def pending(pol: dict, st: dict) -> list[tuple[str, str, str, bool]]:
+    """Rows not yet in force: (id, in force, wanted, needs root)."""
+    live = policy.parse_generated(st["live_hypridle"]) if st["live_hypridle"] else {}
+    want = {(src, a): t for t, src, a, _ in policy.rungs(pol)}
+    rows: dict[str, tuple] = {}
+    for key in sorted(set(want) | set(live)):
+        if want.get(key) != live.get(key):
+            rid = policy.ROW[key[1]]
+            rows.setdefault(rid, (rid, secs(live.get(key)), secs(want.get(key)), False))
+    out = list(rows.values())
+    out += [(rid, have, w, True) for rid, _, have, w in lid_drift(pol, st)]
+    out += [(rid, f"{h}%", f"{w}%", True) for rid, h, w in charge_drift(pol, st)]
+    return out
+
+
+def problems(pol: dict, st: dict) -> list[str]:
+    out = []
+    if st["live_hypridle"] is None:
+        out.append("Idle config is missing. Apply to write it.")
+    elif st["live_hypridle"] != st["want_hypridle"]:
+        out.append("Idle config is out of date. Apply to update it.")
+    if lid_drift(pol, st):
+        out.append("Lid action in logind does not match policy. Apply to fix.")
+    if charge_drift(pol, st):
+        out.append("Charge thresholds do not match policy. Apply to fix.")
+    if policy.sleep_text(pol) != st["live_sleep"]:
+        out.append("Hibernate delay in systemd does not match policy. Apply to fix.")
+    return out
+
+
+# --- editing ---------------------------------------------------------------
+# Which cell maps to which key. Column index is the power source:
+# 0 = plugged in, 1 = on battery. The write itself is system.save().
+
+EDITABLE: dict[tuple[str, int], tuple[str, ...]] = {
+    **{(f"idle.{k}", i): ("idle", k, src)
+       for k, _a, _r in policy.STEPS
+       for i, src in enumerate(policy.SOURCES)},
+    ("lid.close", 0): ("lid", "ac"),
+    ("lid.close", 1): ("lid", "battery"),
+    ("lid.docked", 0): ("lid", "docked"),
+    ("key.power", 0): ("button", "power", "ac"),
+    ("key.power", 1): ("button", "power", "battery"),
+    ("key.power_held", 0): ("button", "power_held", "ac"),
+    ("key.power_held", 1): ("button", "power_held", "battery"),
+    ("chg.start", 0): ("battery", "charge", "start"),
+    ("chg.stop", 0): ("battery", "charge", "stop"),
+    ("low.screen_off", 0): ("battery", "low", "backlight_off"),
+    ("low.hibernate", 0): ("battery", "low", "hibernate"),
+    ("low.poll", 0): ("battery", "low", "poll"),
+}
+
+
+def coerce(raw: str):
+    """'never'/'false' -> False, digits -> int, else the string as given."""
+    text = raw.strip()
+    if text.lower() in ("never", "false", "off", "none"):
+        return False
+    if text.isdigit():
+        return int(text)
+    return text
+
+
+def current(pol: dict, path: tuple[str, ...]):
+    node = pol
+    for key in path:
+        node = node[key]
+    return node

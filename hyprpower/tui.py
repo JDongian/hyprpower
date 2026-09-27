@@ -20,9 +20,8 @@ from textual.widgets import (DataTable, Footer, Input, Label, ListItem,
 
 from textual.screen import ModalScreen
 
-from .edit import EDITABLE, coerce, current, write
-from .verify import pending, problems
-from .view import build
+from . import report, system
+from .report import EDITABLE, build, coerce, current, pending, problems
 
 HL = "bold black on yellow"
 
@@ -47,11 +46,7 @@ class HyprPower(App):
 
     def __init__(self) -> None:
         super().__init__()
-        self.panels, self.flags, self.shown = build()
-        # Marks modified rows GParted-style.
-        self.pending = {rid: rest for rid, *rest in
-                        ((p[0], p[1], p[2], p[3]) for p in pending())}
-        self.problems = problems()
+        self._snapshot()
         # One entry per place a row is drawn.
         self._rows: dict[str, list[tuple[DataTable, str, str]]] = {}
         self._labels: list[Label] = []
@@ -62,6 +57,17 @@ class HyprPower(App):
         self._row_tabs: dict[str, set[str]] = {}
         self._titles: dict[str, str] = {}
         self._selected: int | None = None
+
+    def _snapshot(self) -> None:
+        """One policy load and one machine read per refresh. Everything
+        below is computed from them, so the screen cannot show two
+        different moments."""
+        self.pol = system.load()
+        self.st = system.read(self.pol)
+        self.panels, self.flags, self.shown = build(self.pol, self.st)
+        # Marks modified rows GParted-style.
+        self.pending = {p[0]: (p[1], p[2], p[3]) for p in pending(self.pol, self.st)}
+        self.problems = problems(self.pol, self.st)
 
     def compose(self) -> ComposeResult:
         # Flags sit above the tabs, not inside one: a flag's evidence is
@@ -113,11 +119,7 @@ class HyprPower(App):
         first or they keep pointing at widgets recompose is about to destroy.
         """
         self._remember_position()
-        self.panels, self.flags, self.shown = build()
-        # row id -> (in force, wanted, needs root); marks rows GParted-style
-        self.pending = {rid: rest for rid, *rest in
-                        ((p[0], p[1], p[2], p[3]) for p in pending())}
-        self.problems = problems()
+        self._snapshot()
         self._rows.clear()
         self._row_tabs.clear()
         self._titles.clear()
@@ -181,8 +183,7 @@ class HyprPower(App):
     def _do_apply(self, confirmed: bool | None) -> None:
         if not confirmed:
             return
-        from .apply import apply_session, hyprpower_exe
-        import subprocess
+        from .system import apply_session, sudo_apply_system
         root = any(r for _, _, r in self.pending.values())
         if root:
             # Before apply_session, not after: a declined password used to
@@ -191,7 +192,7 @@ class HyprPower(App):
             # alt screen anyway in case the credential has since timed out.
             with self.suspend():
                 print("\nApplying system settings (logind, charge thresholds)...")
-                rc = subprocess.run(["sudo", hyprpower_exe(), "apply", "--system"]).returncode
+                rc = sudo_apply_system()
             if rc:
                 self.notify(f"nothing applied (sudo exit {rc})", severity="error")
                 return
@@ -216,13 +217,13 @@ class HyprPower(App):
         if path is None:
             self.notify(f"{rid} is not editable here — it is owned elsewhere")
             return
-        self.push_screen(EditValue(path, current(path)), self._do_edit)
+        self.push_screen(EditValue(path, current(self.pol, path)), self._do_edit)
 
     def _do_edit(self, result) -> None:
         if result is None:
             return
         path, raw = result
-        write(path, coerce(raw))
+        system.save(path, coerce(raw))
         self.action_reload()
         self.notify(f"{'.'.join(path)} = {raw}   (press a to apply)")
 
@@ -253,13 +254,13 @@ def main() -> None:
     # write ~/.config and drive the user's hypridle), but applying needs root
     # for the logind drop-in and the charge thresholds. Caching the credential
     # here means the apply never stops to ask.
-    import os, subprocess, sys
+    import os, sys
     if os.geteuid() == 0:
         print("run hyprpower as your own user, not root: as root there is no "
               "user bus, so hypridle cannot be read or restarted. It escalates "
               "on its own for the parts that need it.", file=sys.stderr)
         raise SystemExit(1)
-    if rc := subprocess.run(["sudo", "-v"]).returncode:
+    if rc := system.sudo_refresh():
         print("sudo is required: applying writes /etc/systemd/logind.conf.d "
               "and battery sysfs", file=sys.stderr)
         raise SystemExit(rc)
