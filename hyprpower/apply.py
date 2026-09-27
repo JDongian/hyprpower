@@ -81,6 +81,21 @@ def sleep_text(pol: dict) -> str | None:
     return None if delay is None else SLEEP_DROPIN.format(delay=delay)
 
 
+def logind_want(pol: dict) -> dict[str, str]:
+    """logind property -> the value we intend, in systemd's vocabulary.
+
+    Shared with verify so the comparison and the write cannot disagree: the
+    lid is written translated, so it must be checked translated.
+    """
+    return {
+        "HandleLidSwitchExternalPower": policy.systemd_sleep(pol, "ac", pol["lid"]["ac"]),
+        "HandleLidSwitch": policy.systemd_sleep(pol, "battery", pol["lid"]["battery"]),
+        # docked is orthogonal to the power source, so no escalation applies.
+        "HandleLidSwitchDocked": policy.SYSTEMD.get(pol["lid"]["docked"],
+                                                    pol["lid"]["docked"]),
+    }
+
+
 def apply_system(reload: bool = True) -> Path:
     """Write the logind drop-in and the charge thresholds. Requires root."""
     if os.geteuid() != 0:
@@ -88,9 +103,11 @@ def apply_system(reload: bool = True) -> Path:
                          "(writes /etc/systemd/logind.conf.d and battery sysfs)")
     pol = policy.load()
     LOGIND_PATH.parent.mkdir(parents=True, exist_ok=True)
+    want = logind_want(pol)
     LOGIND_PATH.write_text(LOGIND_DROPIN.format(
-        lid_ac=pol["lid"]["ac"], lid_battery=pol["lid"]["battery"],
-        lid_docked=pol["lid"]["docked"]))
+        lid_ac=want["HandleLidSwitchExternalPower"],
+        lid_battery=want["HandleLidSwitch"],
+        lid_docked=want["HandleLidSwitchDocked"]))
     if reload:
         subprocess.run(["systemctl", "reload", "systemd-logind"], check=True)
 

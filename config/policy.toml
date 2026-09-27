@@ -46,14 +46,13 @@ battery = "2m1s"
 ac      = false        # plugged in: stay reachable
 battery = "10m"
 
-# Set both and they compose: the machine suspends at the first time and
-# systemd hibernates it at the second, via suspend-then-hibernate and an RTC
-# alarm. "Hibernate after N" means the same thing either way -- be hibernated
-# by N of idle. Set only hibernate to go straight to disk.
+# Set both and they compose: the machine sleeps to RAM at the first time and
+# systemd moves it to disk at the second, on an RTC alarm. "Hibernate after N"
+# means the same thing either way -- be hibernated by N of idle. Set only
+# hibernate to go straight to disk.
 #
-# The gap between them becomes HibernateDelaySec, which systemd keeps in one
-# global setting: it cannot differ by power source, and it also governs the
-# suspend-then-hibernate that [lid] asks for.
+# The gap between them is a single global systemd setting: it cannot differ by
+# power source, and it also governs the lid.
 [idle.hibernate]
 ac      = false
 battery = "20m"
@@ -64,7 +63,7 @@ battery = "20m"
 [lid]
 docked  = "ignore"
 ac      = "suspend"
-battery = "suspend-then-hibernate"
+battery = "suspend"
 
 [button.power]
 ac      = "suspend"

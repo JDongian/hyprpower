@@ -231,8 +231,8 @@ def flags(pol, st, shown):
     add = lambda text, *deps: out.append((text, [d for d in deps if d in shown]))
     idle, lg = pol["idle"], st["logind"]
 
-    # Over the composed listeners, not the raw policy: suspend + hibernate
-    # fold into one suspend-then-hibernate, which does reach disk.
+    # Over the emitted listeners, not the raw policy: a hibernate that
+    # follows a suspend is dropped, because systemd performs that escalation.
     by_source = {src: sorted((t, a) for t, s_, a, _ in policy.rungs(pol) if s_ == src)
                  for src in policy.SOURCES}
     if not any(a in policy.SLEEP for rs in by_source.values() for _t, a in rs):
@@ -247,12 +247,20 @@ def flags(pol, st, shown):
         add("logind acts on idle too. It fights the ladder above.", "idle.logind")
 
     dead, volatile = set(), set()
-    for rs in by_source.values():
+    for src, rs in by_source.items():
         if not (asleep := next(((t, a) for t, a in rs if a in policy.SLEEP), None)):
             continue
         dead |= {policy.ROW[a] for t, a in rs if t > asleep[0]}
-        if not policy.SLEEP[asleep[1]]:
+        if src == "battery" and not (policy.SLEEP[asleep[1]]
+                                     or policy.escalates(pol, src)):
             volatile.add(policy.ROW[asleep[1]])
+    # Only on battery: a sleep that cannot reach disk is harmless on AC. The
+    # lid and button escalate by the same rule as the ladder, so losing the
+    # hibernate rung silently removes their protection too.
+    for rid, action in [("lid.close", pol["lid"]["battery"]),
+                        ("key.power", pol["button"]["power"]["battery"])]:
+        if action == "suspend" and not policy.escalates(pol, "battery"):
+            volatile.add(rid)
     if dead:
         add("Scheduled after the machine is already asleep, so it never runs.",
             *sorted(dead))

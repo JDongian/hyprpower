@@ -23,15 +23,16 @@ STEPS = [("dim", "dim", True),
          ("suspend", "suspend", False),
          ("hibernate", "hibernate", False)]
 
-# Which row an emitted action belongs to. suspend-then-hibernate is the
-# composition of two rungs and is attributed to the one that triggers it.
 ROW = {"dim": "idle.dim", "backlight-off": "idle.backlight_off",
        "display-off": "idle.display_off", "lock": "idle.lock",
-       "suspend": "idle.suspend", "hibernate": "idle.hibernate",
-       "suspend-then-hibernate": "idle.suspend"}
+       "suspend": "idle.suspend", "hibernate": "idle.hibernate"}
 
-# Emitted action -> does the machine survive the battery running out in it.
-SLEEP = {"suspend": False, "hibernate": True, "suspend-then-hibernate": True}
+# Does the machine survive the battery running out in it, on its own.
+SLEEP = {"suspend": False, "hibernate": True}
+
+# systemd's names for our actions. This is the ONLY place systemd vocabulary
+# appears: policy says suspend / hibernate / shutdown and nothing else.
+SYSTEMD = {"shutdown": "poweroff"}
 
 # Copied verbatim from the hand-written config. This carries the
 # fingerprint-reader resume logic: after_sleep_cmd's try-restart exists
@@ -73,22 +74,31 @@ def seconds(v) -> int | None:
 def rungs(pol: dict) -> list[tuple[int, str, str, bool]]:
     """The listeners to emit, as (seconds, source, action, restores).
 
-    suspend and hibernate on the same source collapse into one
-    suspend-then-hibernate listener: nothing in userspace runs while asleep,
-    so a second listener could never fire. systemd does the escalation.
+    A hibernate scheduled after a suspend on the same source is dropped:
+    nothing in userspace runs while asleep, so it could never fire. The
+    escalation is systemd's job, arranged by `escalates`.
     """
     out = []
     for source in SOURCES:
         at = {key: seconds(pol["idle"][key][source]) for key, _a, _r in STEPS}
-        fold = (at["suspend"] is not None and at["hibernate"] is not None
-                and at["hibernate"] > at["suspend"])
         for key, action, restores in STEPS:
-            if at[key] is None or (fold and key == "hibernate"):
+            if at[key] is None or (key == "hibernate" and escalates(pol, source)):
                 continue
-            out.append((at[key], source,
-                        "suspend-then-hibernate" if fold and key == "suspend"
-                        else action, restores))
+            out.append((at[key], source, action, restores))
     return sorted(out)
+
+
+def escalates(pol: dict, source: str) -> bool:
+    """Does a suspend on this source go on to reach disk by itself."""
+    s, h = (seconds(pol["idle"][k][source]) for k in ("suspend", "hibernate"))
+    return s is not None and h is not None and h > s
+
+
+def systemd_sleep(pol: dict, source: str, action: str) -> str:
+    """systemd's name for an action, never policy's."""
+    if action == "suspend" and escalates(pol, source):
+        return "suspend-then-hibernate"
+    return SYSTEMD.get(action, action)
 
 
 def hibernate_delay(pol: dict) -> int | None:

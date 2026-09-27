@@ -13,18 +13,18 @@ import glob
 from . import apply, policy, probe
 from .view import secs as _fmt
 
-LID = (("ac", "HandleLidSwitchExternalPower", "lid.close"),
-       ("battery", "HandleLidSwitch", "lid.close"),
-       ("docked", "HandleLidSwitchDocked", "lid.docked"))
+LID_ROW = {"HandleLidSwitchExternalPower": "lid.close",
+           "HandleLidSwitch": "lid.close",
+           "HandleLidSwitchDocked": "lid.docked"}
 
 CHARGE = (("start", "charge_control_start_threshold", "chg.start"),
           ("stop", "charge_control_end_threshold", "chg.stop"))
 
 
 def lid_drift(pol: dict) -> list[tuple[str, str, str, str]]:
-    lg = probe.logind()
-    return [(rid, prop, lg[prop], pol["lid"][key])
-            for key, prop, rid in LID if lg[prop] != pol["lid"][key]]
+    lg, want = probe.logind(), apply.logind_want(pol)
+    return [(LID_ROW[prop], prop, lg[prop], v)
+            for prop, v in want.items() if lg[prop] != v]
 
 
 def charge_drift(pol: dict) -> list[tuple[str, int, int]]:

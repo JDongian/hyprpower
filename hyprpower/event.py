@@ -18,9 +18,8 @@ from . import act, policy
 # progress". Observed 2026-09-26.
 DEBOUNCE_SECONDS = 3
 
-ACTIONS = {a: ["systemctl", a] for a in
-           ("suspend", "hibernate", "suspend-then-hibernate", "poweroff")}
-ACTIONS |= {"lock": ["loginctl", "lock-sessions"], "ignore": None}
+SLEEPS = ("suspend", "hibernate", "shutdown")
+ACTIONS = {"lock": ["loginctl", "lock-sessions"], "ignore": None}
 
 
 def latch() -> Path:
@@ -36,11 +35,15 @@ def debounced(name: str, seconds: int = DEBOUNCE_SECONDS) -> bool:
     return False
 
 
-def run_action(name: str) -> None:
-    if name not in ACTIONS:
+def run_action(pol: dict, name: str) -> None:
+    if name in SLEEPS:
+        subprocess.run(["systemctl", policy.systemd_sleep(pol, source(), name)],
+                       check=True)
+    elif name in ACTIONS:
+        if cmd := ACTIONS[name]:        # "ignore" maps to None on purpose
+            subprocess.run(cmd, check=True)
+    else:
         raise SystemExit(f"unknown action in policy: {name}")
-    if cmd := ACTIONS[name]:            # "ignore" maps to None on purpose
-        subprocess.run(cmd, check=True)
 
 
 def source() -> str:
@@ -50,7 +53,8 @@ def source() -> str:
 def ev_power() -> int:
     if debounced("powerkey"):
         return 0
-    run_action(policy.load()["button"]["power"][source()])
+    pol = policy.load()
+    run_action(pol, pol["button"]["power"][source()])
     return 0
 
 

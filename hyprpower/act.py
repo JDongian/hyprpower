@@ -54,6 +54,10 @@ def save_brightness() -> None:
         saved().write_text(open(f"{panel()}/brightness").read().strip())
 
 
+def source() -> str:
+    return "ac" if on_ac() else "battery"
+
+
 def cmd_on(source: str) -> int:
     assert source in ("ac", "battery"), source
     return 0 if (source == "ac") == on_ac() else 1
@@ -67,17 +71,22 @@ def cmd_do(action: str) -> int:
            pol["display"]["dim_to"] if action == "dim" else "0")
     elif action == "display-off":
         # Opt-in only: a dpms-off listener crashed the whole Hyprland session
-        # on 0.55.x (SIGABRT -> greetd relogin). policy defaults off_method to
-        # "backlight" for that reason.
+        # on 0.55.x (SIGABRT -> greetd relogin).
         sh("hyprctl", "dispatch", "dpms", "off")
     elif action == "lock":
         sh("loginctl", "lock-session")
-    elif action in ("suspend", "hibernate", "suspend-then-hibernate"):
-        sh("systemctl", action)
+    elif action in ("suspend", "hibernate", "shutdown"):
+        sh("systemctl", policy.systemd_sleep(pol, source(), action))
     elif action == "restore":
+        # Brightness first: it always applies, and it must not be blocked by
+        # hyprctl failing. dpms only when the display-off rung is configured
+        # at all -- that rung leaves the panel powered down, so restoring the
+        # brightness alone would wake you to a black screen.
         if saved().exists():
             sh("brightnessctl", "--quiet", "set", saved().read_text().strip())
             saved().unlink()
+        if any(pol["idle"]["display_off"][s] for s in ("ac", "battery")):
+            sh("hyprctl", "dispatch", "dpms", "on")
     else:
         raise SystemExit(f"unknown action: {action}")
     return 0
