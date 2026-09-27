@@ -18,3 +18,8 @@ hyprpower = "hyprpower.cli:main"
 
 [tool.setuptools]
 packages = ["hyprpower"]
+
+# Ships the default profile with the code, so `hyprpower` installed by pip
+# can tell you where to copy it from.
+[tool.setuptools.package-data]
+hyprpower = ["default.toml"]

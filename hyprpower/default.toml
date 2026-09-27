@@ -1,7 +1,8 @@
-# The shipped default. config/profile.toml is the one that is read; start
-# from a copy of this and edit it:
+# The shipped default. The profile that is actually read lives at
+# $XDG_CONFIG_HOME/hyprpower/profile.toml; start from a copy of this:
 #
-#     cp config/default.toml config/profile.toml
+#     mkdir -p ~/.config/hyprpower
+#     cp default.toml ~/.config/hyprpower/profile.toml
 #
 # Every key must be present. hyprpower holds no values of its own, so a file
 # like this is the only place a default can live.

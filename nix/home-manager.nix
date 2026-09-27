@@ -4,9 +4,10 @@
 # hypridle unit that calls back into it. The system half (logind, charge
 # thresholds, ACPI events) is nix/nixos.nix.
 #
-# It does NOT place the config. hyprpower reads config/profile.toml next to
-# its own code, so nothing here has to link a file into ~/.config -- which is
-# what previously made home-manager mandatory rather than a convenience.
+# It does NOT own the profile. hyprpower reads
+# $XDG_CONFIG_HOME/hyprpower/profile.toml, and anything home-manager
+# generates is a read-only store symlink the TUI could never write -- which
+# is why this seeds or links, and never generates.
 { config, lib, pkgs, ... }:
 
 let
@@ -100,7 +101,7 @@ in
         p="''${XDG_CONFIG_HOME:-$HOME/.config}/hyprpower/profile.toml"
         if [ ! -e "$p" ]; then
           run mkdir -p "$(dirname "$p")"
-          run cp ${../config/default.toml} "$p"
+          run cp ${../hyprpower/default.toml} "$p"
           run chmod u+w "$p"
         fi
       '');

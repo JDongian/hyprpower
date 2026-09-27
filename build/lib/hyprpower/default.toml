@@ -1,0 +1,100 @@
+# The shipped default. The profile that is actually read lives at
+# $XDG_CONFIG_HOME/hyprpower/profile.toml; start from a copy of this:
+#
+#     mkdir -p ~/.config/hyprpower
+#     cp default.toml ~/.config/hyprpower/profile.toml
+#
+# Every key must be present. hyprpower holds no values of its own, so a file
+# like this is the only place a default can live.
+#
+# Everything is "on TRIGGER, if on AC or on battery, do ACTION". The daemons
+# are dispatchers; none of them owns a decision:
+#
+#   [idle.*]     -> generated hypridle listeners
+#   [lid]        -> logind drop-in (logind splits the lid natively)
+#   [button.*]   -> acpid, because logind has no power-source variant for keys
+#   [charge]     -> systemd timer polling the battery
+#
+# THE POWER SOURCE IS ALWAYS THE LEAF KEY, everywhere in this file, so every
+# setting maps to its two values with the same shape. Durations: "90s",
+# "2m30s", "10m". false = never.
+#
+# Not here: CPU governor, charge start/stop thresholds, device runtime PM.
+# TLP owns those and hyprpower only reads them.
+
+[display]
+# What "dim" means. MUST carry a unit: brightnessctl reads a bare 10 as a raw
+# value, which on a 24242-step panel is 0.04% — the current config says
+# `set 10` and has been blanking the screen rather than dimming it.
+dim_to = "10%"
+
+[lock]
+# The user unit hypridle starts to lock the session.
+unit = "hyprlock.service"
+
+# Restart the locker after resume. Needed only where the fingerprint reader
+# gets exactly ONE fprintd re-claim attempt across suspend: a stale locker
+# instance consumes it and then fails silently. Harmless but pointless
+# otherwise, so it is off in the default preset.
+restart_on_resume = false
+
+[idle.dim]
+ac      = "2m"
+battery = "1m45s"
+
+[idle.backlight_off]
+ac      = "10m"
+battery = "2m"
+
+[idle.display_off]
+ac      = false
+battery = false
+
+[idle.lock]
+ac      = "10m1s"
+battery = "2m1s"
+
+[idle.suspend]
+ac      = false        # plugged in: stay reachable
+battery = "10m"
+
+# Set both and they compose: the machine sleeps to RAM at the first time and
+# systemd moves it to disk at the second, on an RTC alarm. "Hibernate after N"
+# means the same thing either way -- be hibernated by N of idle. Set only
+# hibernate to go straight to disk.
+#
+# The gap between them is a single global systemd setting: it cannot differ by
+# power source, and it also governs the lid.
+[idle.hibernate]
+ac      = false
+battery = "20m"
+
+# Three mutually exclusive conditions, not a power-source split. "docked"
+# means an external display or dock is attached — NOT merely plugged in —
+# and it wins over the other two when present.
+[lid]
+docked  = "ignore"
+ac      = "suspend"
+battery = "suspend"
+
+[button.power]
+ac      = "suspend"
+battery = "hibernate"
+
+[button.power_held]
+ac      = "ignore"
+battery = "ignore"
+
+# Charging limits. Absolute, not power-source dependent. Taken over from
+# TLP (START/STOP_CHARGE_THRESH_BAT0) so they can be changed here.
+[battery.charge]
+start = 70     # begin charging only below this
+stop  = 80     # stop charging at this: holding 100% ages the cell faster,
+               # and this laptop mostly lives plugged in
+
+# What happens as the battery drains. Trigger is charge level, not time, and
+# only applies on battery by definition.
+[battery.low]
+poll          = "1m"
+backlight_off = 6      # park the screen, keep polling
+hibernate     = 5      # the save-your-work action
