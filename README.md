@@ -1,6 +1,6 @@
 # hyprpower
 
-One declarative power policy for a Hyprland laptop on NixOS.
+Power management for Hyprland laptops on NixOS.
 
 ![hyprpower](docs/screenshot.png)
 
@@ -8,7 +8,7 @@ One declarative power policy for a Hyprland laptop on NixOS.
 
 The Hypr ecosystem has an idle daemon, a lock screen, a bar and a wallpaper
 daemon. It has no power manager. GNOME and KDE ship one; here the pieces
-exist but nothing joins them, and each covers a different part of the job:
+exist and nothing joins them:
 
 | | owns | splits by AC / battery |
 |---|---|---|
@@ -17,13 +17,13 @@ exist but nothing joins them, and each covers a different part of the job:
 | acpid | ACPI events | no |
 | TLP | hardware tunables | every setting |
 
-So there is nowhere to write down what the laptop should do, and nothing to
-check that it does it. Some behaviours have no home at all: acting on a
-battery level, escalating a suspend to hibernate, treating charge thresholds
-as policy rather than as a TLP setting.
+There is nowhere to write down what the laptop should do, and nothing to
+check that it does it. Several behaviours have no owner: acting on a battery
+level, escalating a suspend to hibernate, and treating charge thresholds as
+policy instead of a TLP setting.
 
 hyprpower is that layer. One file, compiled to the four places the pieces
-actually read:
+read:
 
 ```
 profile.toml ──▶ hypridle.conf          one listener per rung per power source
@@ -32,9 +32,9 @@ profile.toml ──▶ hypridle.conf          one listener per rung per power so
              ──▶ battery sysfs          charge thresholds
 ```
 
-`hyprpower verify` checks all four against the profile. Each can drift:
-hypridle reads its config once at startup, logind caches its own until
-reloaded, and TLP rewrites the charge thresholds when it restarts.
+`hyprpower verify` checks all four against the profile. Each one drifts on
+its own: hypridle reads its config once at startup, logind caches its own
+until reloaded, and TLP rewrites the charge thresholds when it restarts.
 
 ## The profile
 
@@ -44,7 +44,7 @@ ac      = "2m"
 battery = "1m45s"      # the power source is always the leaf key
 
 [idle.suspend]
-ac      = false        # false is never
+ac      = false        # false means never
 battery = "10m"
 
 [idle.hibernate]
@@ -52,7 +52,7 @@ ac      = false
 battery = "20m"        # with the suspend above: RAM at 10m, disk at 20m
 
 [lid]
-docked  = "ignore"     # docked wins over the two below it
+docked  = "ignore"     # docked wins over the two below
 ac      = "suspend"
 battery = "suspend"
 
@@ -70,18 +70,18 @@ backlight_off = 6
 hibernate     = 5
 ```
 
-Actions are `ignore`, `lock`, `suspend`, `hibernate`, `shutdown`. Durations
-are `false` or a string like `"90s"`, `"2m30s"`, `"10m"`.
+Actions are `ignore`, `lock`, `suspend`, `hibernate` and `shutdown`.
+Durations are `false` or a string: `"90s"`, `"2m30s"`, `"10m"`.
 
-Set both `[idle.suspend]` and `[idle.hibernate]` and they compose: sleep to
-RAM at the first time, to disk at the second. Nothing in userspace runs while
-asleep, so systemd does that escalation on an RTC alarm.
+Set `[idle.suspend]` and `[idle.hibernate]` together and they compose: RAM at
+the first time, disk at the second. Nothing in userspace runs while the
+machine is asleep, so systemd performs the escalation on an RTC alarm.
 
 ## The TUI
 
 `e` edits a value back into the profile, comments intact. `a` applies,
-escalating once for the system half. It also reports settings that will not
-do what they look like:
+escalating once for the system half. The flag list names settings that
+cannot work:
 
 ```
 * Scheduled after the machine is already asleep, so it never runs.
@@ -90,8 +90,15 @@ do what they look like:
       (Suspend after = never / 10m)
 ```
 
-These are checks over the compiled listeners rather than named cases, so
-any rung scheduled after the machine sleeps is reported.
+Both come from checks over the compiled listeners, so any rung scheduled
+after the machine sleeps is caught, not only the pairs someone thought of.
+
+## What it does not do
+
+hyprpower owns policy, not tuning. It does not set the CPU governor, disk or
+USB runtime power, or radio power saving; TLP owns those and hyprpower only
+reads them. It does not manage keyboard backlight, external display
+brightness, power profiles, or thermal limits.
 
 ## Install
 
@@ -113,10 +120,10 @@ programs.hyprpower.enable = true;
 
 Run `hyprpower`, press `a`.
 
-Your profile is seeded to `~/.config/hyprpower/profile.toml` from
-[`hyprpower/default.toml`](hyprpower/default.toml). Point it at a file under
+The first run copies [`hyprpower/default.toml`](hyprpower/default.toml) to
+`~/.config/hyprpower/profile.toml`. Point that path at a file you keep under
 version control and the TUI writes through the symlink, so a rebuilt machine
-keeps your policy:
+comes back with your policy:
 
 ```nix
 programs.hyprpower.profileSource = "/etc/nixos/hyprpower/profile.toml";
@@ -132,8 +139,8 @@ Only `apply --system` needs root. It writes three things:
 <battery>/charge_control_{start,end}_threshold
 ```
 
-Everything else stays in your home. Actions are a closed set, so the profile
-cannot contain a command. The exception is `[lock] unit`, which is copied
+Everything else stays in your home. Actions are a closed set, so a profile
+cannot carry a command. The exception is `[lock] unit`, which hyprpower copies
 into the generated config as a `systemctl` argument.
 
 MIT.
