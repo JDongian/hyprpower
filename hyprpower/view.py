@@ -201,6 +201,8 @@ def build(pol: dict | None = None, st: dict | None = None):
     tlp_sheets = [(name, TWO, sorted(rows, key=lambda x: x[1]))
                   for name in [g for g, _ in TLP_GROUPS] + ["Other"]
                   if (rows := grouped.get(name))]
+    if not st["tlp_all"]:
+        tlp_sheets = [(None, ONE, [r("tlp.absent", "TLP", ["not installed"])])]
 
     panels = [
         ("Status", [(None, ONE, status), ("System", ONE, system)]),

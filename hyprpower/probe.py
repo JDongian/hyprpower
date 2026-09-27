@@ -14,6 +14,7 @@ from __future__ import annotations
 import glob
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -100,7 +101,11 @@ def state() -> dict:
     # tlp.conf says what was actually chosen here. TLP's naming also makes
     # power-source-dependent settings self-identifying: every X_ON_AC has an
     # X_ON_BAT sibling.
-    tlp_rows = re.findall(r'^(\S+)\s+L\d+:\s*(\w+)="([^"]*)"', sh("tlp-stat", "-c"), re.M)
+    # Optional: TLP owns tunables hyprpower only reads, so its absence is a
+    # smaller machine to describe, not an error.
+    tlp_rows = (re.findall(r'^(\S+)\s+L\d+:\s*(\w+)="([^"]*)"',
+                           sh("tlp-stat", "-c"), re.M)
+                if shutil.which("tlp-stat") else [])
     tlp_conf = {k: v for _, k, v in tlp_rows}
 
     radios = {}

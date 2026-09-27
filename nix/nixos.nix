@@ -8,6 +8,7 @@
 
 let
   cfg = config.services.hyprpower;
+  home = config.users.users.${cfg.user}.home;
   # These run as root, where HOME is /root, so the profile must be named
   # explicitly or they would look under /root/.config and find nothing.
   run = args: "HYPRPOWER_POLICY=${cfg.policyFile} ${cfg.exe} ${args}\n";
@@ -16,22 +17,32 @@ in
   options.services.hyprpower = {
     enable = lib.mkEnableOption "the hyprpower system power policy";
 
+    user = lib.mkOption {
+      type = lib.types.str;
+      example = "alice";
+      description = ''
+        The user whose session this manages. Everything else is derived from
+        it: these units run as root, where HOME is /root, so they must be
+        told whose profile to read and whose hyprpower to run. One input, so
+        the two cannot drift apart.
+      '';
+    };
+
     policyFile = lib.mkOption {
       type = lib.types.str;
-      example = "/home/you/.config/hyprpower/profile.toml";
-      description = ''
-        Absolute path to the profile these root units should read, i.e. the
-        one belonging to the user whose session this manages.
-      '';
+      default = "${home}/.config/hyprpower/profile.toml";
+      defaultText = "<user home>/.config/hyprpower/profile.toml";
+      description = "Override only if the profile is not at the XDG default.";
     };
 
     exe = lib.mkOption {
       type = lib.types.str;
-      example = "/home/you/.local/bin/hyprpower";
+      default = "${home}/.local/bin/hyprpower";
+      defaultText = "<user home>/.local/bin/hyprpower";
       description = ''
-        Absolute path to the hyprpower executable. Absolute, never a bare
-        name: these units run with a minimal PATH, where a bare name exits
-        127 and the failure is silent.
+        Absolute, never a bare name: these units run with a minimal PATH,
+        where a bare name exits 127 and the failure is silent. Override to
+        use a packaged build instead of the home-manager wrapper.
       '';
     };
 
