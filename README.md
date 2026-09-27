@@ -39,22 +39,39 @@ reloaded, and TLP rewrites the charge thresholds when it restarts.
 ## The profile
 
 ```toml
-[idle.dim]              [lid]
-ac      = "2m"          docked  = "ignore"
-battery = "1m45s"       ac      = "suspend"
-                        battery = "suspend"
+[idle.dim]
+ac      = "2m"
+battery = "1m45s"      # the power source is always the leaf key
+
 [idle.suspend]
-ac      = false         [battery.charge]
-battery = "10m"         start = 70
-                        stop  = 80
+ac      = false        # false is never
+battery = "10m"
+
 [idle.hibernate]
-ac      = false         [button.power]
-battery = "20m"         ac      = "suspend"
-                        battery = "hibernate"
+ac      = false
+battery = "20m"        # with the suspend above: RAM at 10m, disk at 20m
+
+[lid]
+docked  = "ignore"     # docked wins over the two below it
+ac      = "suspend"
+battery = "suspend"
+
+[button.power]
+ac      = "suspend"
+battery = "hibernate"
+
+[battery.charge]
+start = 70             # begin charging below this
+stop  = 80
+
+[battery.low]          # charge level, not time; on battery by definition
+dim           = 15
+backlight_off = 6
+hibernate     = 5
 ```
 
-The power source is always the leaf key. Actions are `ignore`, `lock`,
-`suspend`, `hibernate`, `shutdown`; durations are `never`, `90s`, `2m30s`.
+Actions are `ignore`, `lock`, `suspend`, `hibernate`, `shutdown`. Durations
+are `false` or a string like `"90s"`, `"2m30s"`, `"10m"`.
 
 Set both `[idle.suspend]` and `[idle.hibernate]` and they compose: sleep to
 RAM at the first time, to disk at the second. Nothing in userspace runs while
