@@ -1,13 +1,13 @@
 # hyprpower
 
-One declarative power policy for a Hyprland laptop.
+One declarative power policy for a Hyprland laptop on NixOS.
 
 ![hyprpower](docs/screenshot.png)
 
 ## Why
 
-Nothing on a Wayland laptop owns power policy. It is spread across four
-daemons with four config languages, and none of them agrees with the others:
+Power policy is spread across four daemons, and they do not agree on the one
+thing a laptop cares about:
 
 | | splits by AC / battery? |
 |---|---|
@@ -15,10 +15,6 @@ daemons with four config languages, and none of them agrees with the others:
 | logind — lid, power button | only the lid |
 | acpid — ACPI events | no |
 | TLP — hardware tunables | every setting |
-
-So "dim sooner on battery" has no answer, and the settings you *can* change
-are in four places that can silently disagree with each other and with what
-the machine is actually doing.
 
 hyprpower puts the whole table in one file and compiles it:
 
@@ -29,9 +25,9 @@ profile.toml ──▶ hypridle.conf          one listener per rung per power so
              ──▶ battery sysfs          charge thresholds
 ```
 
-`hyprpower verify` then checks all four against the profile, because none of
-them stays put: hypridle reads its config once at startup, logind caches its
-own until reloaded, and TLP reasserts charge thresholds whenever it restarts.
+`hyprpower verify` then checks all four, because none of them stays put:
+hypridle reads its config once at startup, logind caches its own until
+reloaded, and TLP reasserts charge thresholds whenever it restarts.
 
 ## The profile
 
@@ -50,19 +46,17 @@ battery = "20m"         ac      = "suspend"
                         battery = "hibernate"
 ```
 
-The power source is always the leaf key, everywhere. Actions are
-`ignore`, `lock`, `suspend`, `hibernate`, `shutdown`; durations are `never`,
-`90s`, `2m30s`, `10m`.
+The power source is always the leaf key. Actions are `ignore`, `lock`,
+`suspend`, `hibernate`, `shutdown`; durations are `never`, `90s`, `2m30s`.
 
-Set both `[idle.suspend]` and `[idle.hibernate]` on one source and they
-compose: the machine suspends at the first time and systemd moves it to disk
-at the second. Nothing in userspace runs while asleep, so a second listener
-could never have fired — systemd does that escalation on an RTC alarm.
+Set both `[idle.suspend]` and `[idle.hibernate]` and they compose: sleep to
+RAM at the first time, to disk at the second. Nothing in userspace runs while
+asleep, so systemd does that escalation on an RTC alarm.
 
-## What the TUI adds
+## The TUI
 
-Editing (`e`) writes back to the profile, comments intact. Applying (`a`)
-escalates once for the system half. And it reports what it cannot fix for
+`e` edits a value back into the profile, comments intact. `a` applies,
+escalating once for the system half. And it reports what it will not fix for
 you:
 
 ```
@@ -72,16 +66,10 @@ you:
       (Suspend after = never / 10m)
 ```
 
-Both are rules over the compiled listeners rather than special cases, so any
-rung scheduled after the machine sleeps is caught, not just the pair someone
-thought of.
+Those are rules over the compiled listeners, not special cases, so any rung
+scheduled after the machine sleeps is caught.
 
 ## Install
-
-Requires Hyprland, hypridle, brightnessctl, and systemd. TLP is optional —
-its tab reads as "not installed" without it.
-
-Add the flake, then import whichever half you use. The two are independent:
 
 ```nix
 inputs.hyprpower.url = "github:JDongian/hyprpower";
@@ -99,27 +87,21 @@ imports = [ inputs.hyprpower.homeManagerModules.default ];
 programs.hyprpower.enable = true;
 ```
 
-Then run `hyprpower` to look, and `a` to apply.
+Run `hyprpower`, press `a`.
 
 Your profile is seeded to `~/.config/hyprpower/profile.toml` from
 [`hyprpower/default.toml`](hyprpower/default.toml). Point it at a file under
-version control instead and the TUI writes through the symlink, so a fresh
-machine rebuilds with your policy rather than the default:
+version control and the TUI writes through the symlink, so a rebuilt machine
+keeps your policy:
 
 ```nix
 programs.hyprpower.profileSource = "/etc/nixos/hyprpower/profile.toml";
 ```
 
-Without Nix, `pip install .` gives you the TUI, `verify` and the `do`/`event`
-subcommands — but nothing is wired up: no hypridle unit, no ACPI routing, no
-battery timer. [`nix/nixos.nix`](nix/nixos.nix) and
-[`nix/home-manager.nix`](nix/home-manager.nix) are the reference for what
-those need to be.
-
 ## What it touches
 
-`hyprpower` itself is unprivileged and refuses to start as root. Only
-`apply --system` escalates, and it writes exactly three things:
+hyprpower is unprivileged and refuses to run as root. Only `apply --system`
+escalates, and it writes three things:
 
 ```
 /etc/systemd/logind.conf.d/50-hyprpower.conf   lid, HandlePowerKey=ignore
@@ -127,20 +109,9 @@ those need to be.
 <battery>/charge_control_{start,end}_threshold
 ```
 
-Everything else stays in your home: the profile, the generated hypridle
-config under `~/.local/state`, and a brightness slot in `/run/hyprpower`
-shared with the root-side battery handler.
-
-The profile cannot smuggle in commands. Actions are a closed set —
-`ignore`, `lock`, `suspend`, `hibernate`, `shutdown` — and anything else is
-rejected rather than executed. The one exception is `[lock] unit`, which is
-interpolated into the generated config as a `systemctl` argument, so treat
-the profile with the same trust you give your shell rc.
-
-## Scope
-
-Hyprland only, and developed on one ThinkPad running NixOS. The compositor
-assumptions are `hyprctl dispatch dpms` and a `hyprlock` unit; everything
-else is systemd and sysfs.
+Everything else stays in your home. The profile cannot smuggle in commands:
+actions are a closed set and anything else is rejected. `[lock] unit` is
+interpolated into the generated config, so treat the profile as you would
+your shell rc.
 
 MIT.
