@@ -6,8 +6,8 @@ One declarative power policy for a Hyprland laptop on NixOS.
 
 ## Why
 
-Power policy is spread across four daemons, and they do not agree on the one
-thing a laptop cares about:
+Four daemons hold pieces of a laptop's power policy, and they split it by
+power source inconsistently:
 
 | | splits by AC / battery? |
 |---|---|
@@ -25,9 +25,9 @@ profile.toml ──▶ hypridle.conf          one listener per rung per power so
              ──▶ battery sysfs          charge thresholds
 ```
 
-`hyprpower verify` then checks all four, because none of them stays put:
+`hyprpower verify` checks all four against the profile. Each can drift:
 hypridle reads its config once at startup, logind caches its own until
-reloaded, and TLP reasserts charge thresholds whenever it restarts.
+reloaded, and TLP rewrites the charge thresholds when it restarts.
 
 ## The profile
 
@@ -56,8 +56,8 @@ asleep, so systemd does that escalation on an RTC alarm.
 ## The TUI
 
 `e` edits a value back into the profile, comments intact. `a` applies,
-escalating once for the system half. And it reports what it will not fix for
-you:
+escalating once for the system half. It also reports settings that will not
+do what they look like:
 
 ```
 * Scheduled after the machine is already asleep, so it never runs.
@@ -66,8 +66,8 @@ you:
       (Suspend after = never / 10m)
 ```
 
-Those are rules over the compiled listeners, not special cases, so any rung
-scheduled after the machine sleeps is caught.
+These are checks over the compiled listeners rather than named cases, so
+any rung scheduled after the machine sleeps is reported.
 
 ## Install
 
@@ -108,9 +108,8 @@ Only `apply --system` needs root. It writes three things:
 <battery>/charge_control_{start,end}_threshold
 ```
 
-Everything else stays in your home. The profile cannot smuggle in commands:
-actions are a closed set and anything else is rejected. `[lock] unit` is
-interpolated into the generated config, so treat the profile as you would
-your shell rc.
+Everything else stays in your home. Actions are a closed set, so the profile
+cannot contain a command. The exception is `[lock] unit`, which is copied
+into the generated config as a `systemctl` argument.
 
 MIT.
