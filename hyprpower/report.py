@@ -11,12 +11,12 @@ drift is a flag rather than a column.
 
 from __future__ import annotations
 
+from enum import IntEnum
+
 from . import policy
 
 ONE, TWO = [""], ["Plugged in", "On battery"]
 
-# (row label, policy key). Module level so the flags can cite a rung by the
-# label the UI actually shows.
 LADDER = [("Dim display after", "dim"),
           ("Turn off backlight after", "backlight_off"),
           ("Turn off display after", "display_off"),
@@ -69,8 +69,6 @@ class Build:
 
     def row(self, rid, label, values, detail=None):
         cells = [str(v) for v in values]
-        # Every column, not just the first: a flag about the battery column
-        # was citing the plugged-in value.
         self.shown[rid] = (label, " / ".join(cells))
         return (rid, label, cells, detail)
 
@@ -82,7 +80,6 @@ def build(pol: dict, st: dict):
     health = 100 * st["energy_full"] / st["energy_design"]
     both = lambda k: [pol[k]["ac"], pol[k]["battery"]]
 
-    # --- 1. Status -------------------------------------------------------
     status = [
         r("now.source", "Power source", ["Plugged in" if st["on_ac"] else "On battery"]),
         r("now.charge", "Battery level", [f'{st["percent"]}%']),
@@ -105,30 +102,27 @@ def build(pol: dict, st: dict):
         None,
         r("now.bluetooth", "Bluetooth", [st["radios"]["bluetooth"]]),
         r("now.wlan", "Wi-Fi", [st["radios"]["wlan"]]),
-        # The ladder in Power management is only real while this is running.
     ]
 
-    # --- 1b. System ------------------------------------------------------
     system = [
         r("sys.os", "OS", [st["os"]]),
         r("sys.kernel", "Kernel", [st["kernel"]]),
         r("sys.systemd", "systemd", [st["systemd"]]),
         r("sys.compositor", "Compositor", [f'Hyprland {st["hyprland_version"]}']),
         None,
-        # Make the chain visible: policy is the source, the generated config
-        # is the artifact, hypridle is what enforces it. A "stale config"
-        # flag referring to a file the UI never showed was just confusing.
+        # Shown because a drift flag naming a file the UI never displayed
+        # was confusing.
         r("sys.policy", "Profile", [st["profile"]]),
         r("sys.generated", "Generated config",
           [st["generated"]]),
         None,
     ]
+    # The ladder in Power management is only real while hypridle is running.
     for unit, active, version in st["services"]:
         system.append(r(f"svc.{unit}", unit,
                         [("running" if active else "stopped")
                          + (f"   v{version}" if version else "")]))
 
-    # --- 2. Hardware -----------------------------------------------------
     press = [
         r("key.power", "Power button action",
           [pol["button"]["power"]["ac"], pol["button"]["power"]["battery"]]),
@@ -136,8 +130,7 @@ def build(pol: dict, st: dict):
           [pol["button"]["power_held"]["ac"], pol["button"]["power_held"]["battery"]]),
         r("lid.close", "Lid close action", both("lid")),
     ]
-    # Rows, not columns: the lid's axis is {docked, AC, battery} with docked
-    # winning, so it is not the two-valued power-source split used above.
+    # docked wins over AC/battery, so it is a row not a column.
     press.append(r("lid.docked", "Lid close action (docked)",
                    [pol["lid"]["docked"]] * 2))
     mech = [
@@ -146,7 +139,6 @@ def build(pol: dict, st: dict):
         r("susp.hib", "Hibernate method", [st["hibernate_method"]]),
     ]
 
-    # --- 3. Power management --------------------------------------------
     ladder = []
     for label, key in LADDER:
         detail = None
@@ -171,10 +163,8 @@ def build(pol: dict, st: dict):
         r("susp.inhibit", "Inhibit delay max", [secs(lg["InhibitDelayMaxUSec"])]),
     ]
 
-    # --- 4. TLP (read-only; TLP owns these) ------------------------------
-    # Every setting TLP has in effect, grouped by what it controls rather
-    # than by whether it happens to split by power source. A trailing *
-    # means it is set in /etc/tlp.conf here, not left at a TLP default.
+    # A trailing * means the setting is in /etc/tlp.conf here, not left at
+    # a TLP default.
     star = lambda k: "  *" if k in st["tlp_set"] else ""
     paired = {f"{k}_ON_{sfx}" for k in st["tlp_pairs"] for sfx in ("AC", "BAT")}
     grouped: dict[str, list] = {}
@@ -225,7 +215,7 @@ def flags(pol, st, shown):
     # follows a suspend is dropped, because systemd performs that escalation.
     by_source = {src: sorted((t, a) for t, s_, a, _ in policy.rungs(pol) if s_ == src)
                  for src in policy.SOURCES}
-    if not any(a in policy.SLEEP for rs in by_source.values() for _t, a in rs):
+    if not any(a in policy.SLEEPS for rs in by_source.values() for _t, a in rs):
         add("Never suspends or hibernates when idle. Stays awake until you close "
             "the lid.",
             "idle.suspend", "lid.close")
@@ -243,18 +233,17 @@ def flags(pol, st, shown):
 
     dead, volatile = set(), set()
     for src, rs in by_source.items():
-        if not (asleep := next(((t, a) for t, a in rs if a in policy.SLEEP), None)):
+        if not (asleep := next(((t, a) for t, a in rs if a in policy.SLEEPS), None)):
             continue
         dead |= {policy.ROW[a] for t, a in rs if t > asleep[0]}
-        if src == "battery" and not (policy.SLEEP[asleep[1]]
-                                     or policy.escalates(pol, src)):
+        if src == policy.Source.BATTERY and not (
+                asleep[1] in policy.REACHES_DISK or policy.escalates(pol, src)):
             volatile.add(policy.ROW[asleep[1]])
-    # Only on battery: a sleep that cannot reach disk is harmless on AC. The
-    # lid and button escalate by the same rule as the ladder, so losing the
-    # hibernate rung silently removes their protection too.
+    # The lid and button escalate by the same rule as the ladder, so losing
+    # the hibernate rung silently unprotects them too.
     for rid, action in [("lid.close", pol["lid"]["battery"]),
                         ("key.power", pol["button"]["power"]["battery"])]:
-        if action == "suspend" and not policy.escalates(pol, "battery"):
+        if action == policy.Action.SUSPEND and not policy.escalates(pol, "battery"):
             volatile.add(rid)
     if dead:
         add("Scheduled after the machine is already asleep, so it never runs.",
@@ -263,8 +252,6 @@ def flags(pol, st, shown):
         add("This suspend never reaches disk, so the battery can run flat.",
             *sorted(volatile), "idle.hibernate")
 
-    # s2idle vs deep is a row, not a finding: hibernate bounds the drain
-    # either way.
     if not st["hypridle"]:
         add("hypridle is not running, so no idle action happens.",
             "svc.hypridle", "idle.dim", "idle.lock")
@@ -273,7 +260,6 @@ def flags(pol, st, shown):
     return out
 
 
-# --- drift: declared vs in force -------------------------------------------
 # Four things can disagree. hypridle reads its config once at startup, logind
 # caches its own until reloaded, TLP reasserts charge thresholds whenever it
 # restarts, and the hibernate delay lives in a systemd drop-in. [button.power]
@@ -324,32 +310,35 @@ def problems(pol: dict, st: dict) -> list[str]:
     if lid_drift(pol, st):
         out.append("Lid action in logind does not match the profile. Apply to fix.")
     if charge_drift(pol, st):
-        out.append("Charge thresholds do not match policy. Apply to fix.")
+        out.append("Charge thresholds do not match the profile. Apply to fix.")
     if policy.sleep_text(pol) != st["live_sleep"]:
         out.append("Hibernate delay in systemd does not match the profile. Apply to fix.")
     return out
 
 
-# --- editing ---------------------------------------------------------------
-# Which cell maps to which key. Column index is the power source:
-# 0 = plugged in, 1 = on battery. The write itself is system.save().
+class Col(IntEnum):
+    """Which value column a cell is in. IntEnum so the TUI can look up by the
+    raw cursor column and still match these keys."""
+    AC = 0
+    BATTERY = 1
+    ONLY = 0        # single-valued rows have just the one column
+
 
 EDITABLE: dict[tuple[str, int], tuple[str, ...]] = {
-    **{(f"idle.{k}", i): ("idle", k, src)
-       for k, _a, _r in policy.STEPS
-       for i, src in enumerate(policy.SOURCES)},
-    ("lid.close", 0): ("lid", "ac"),
-    ("lid.close", 1): ("lid", "battery"),
-    ("lid.docked", 0): ("lid", "docked"),
-    ("key.power", 0): ("button", "power", "ac"),
-    ("key.power", 1): ("button", "power", "battery"),
-    ("key.power_held", 0): ("button", "power_held", "ac"),
-    ("key.power_held", 1): ("button", "power_held", "battery"),
-    ("chg.start", 0): ("battery", "charge", "start"),
-    ("chg.stop", 0): ("battery", "charge", "stop"),
-    ("low.screen_off", 0): ("battery", "low", "backlight_off"),
-    ("low.hibernate", 0): ("battery", "low", "hibernate"),
-    ("low.poll", 0): ("battery", "low", "poll"),
+    **{(f"idle.{k}", Col[src.upper()]): ("idle", k, src)
+       for k in (s.key for s in policy.STEPS) for src in policy.SOURCES},
+    ("lid.close", Col.AC): ("lid", "ac"),
+    ("lid.close", Col.BATTERY): ("lid", "battery"),
+    ("lid.docked", Col.ONLY): ("lid", "docked"),
+    ("key.power", Col.AC): ("button", "power", "ac"),
+    ("key.power", Col.BATTERY): ("button", "power", "battery"),
+    ("key.power_held", Col.AC): ("button", "power_held", "ac"),
+    ("key.power_held", Col.BATTERY): ("button", "power_held", "battery"),
+    ("chg.start", Col.ONLY): ("battery", "charge", "start"),
+    ("chg.stop", Col.ONLY): ("battery", "charge", "stop"),
+    ("low.screen_off", Col.ONLY): ("battery", "low", "backlight_off"),
+    ("low.hibernate", Col.ONLY): ("battery", "low", "hibernate"),
+    ("low.poll", Col.ONLY): ("battery", "low", "poll"),
 }
 
 

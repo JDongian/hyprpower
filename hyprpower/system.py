@@ -22,7 +22,6 @@ from pathlib import Path
 
 from . import policy
 
-# --- running things --------------------------------------------------------
 
 def run(*cmd: str) -> None:
     subprocess.run(cmd, check=True)
@@ -51,7 +50,6 @@ def panel() -> str:
     return sorted(glob.glob("/sys/class/backlight/*"))[0]
 
 
-# --- locating ourselves ----------------------------------------------------
 
 # Fixed search order, NOT the caller's PATH. The rendered config must be
 # byte-identical whoever generates it, or `verify` reports drift purely
@@ -88,7 +86,6 @@ def exe() -> str:
                      "set HYPRPOWER_EXE")
 
 
-# --- the profile -----------------------------------------------------------
 
 def profile_path() -> Path:
     """$XDG_CONFIG_HOME/hyprpower/profile.toml.
@@ -166,7 +163,6 @@ LOGIND_PATH = Path("/etc/systemd/logind.conf.d/50-hyprpower.conf")
 SLEEP_PATH = Path("/etc/systemd/sleep.conf.d/50-hyprpower.conf")
 
 
-# --- reading the machine ---------------------------------------------------
 
 # Only the lid has a power-source variant; key handlers are single-valued,
 # which is a logind limit rather than a configuration choice.
@@ -287,7 +283,6 @@ def read(pol: dict) -> dict:
         "charge_start": int(slurp(f"{bat}/charge_control_start_threshold")),
         "charge_stop": int(slurp(f"{bat}/charge_control_end_threshold")),
         "radios": radios,
-        # Live artifact contents, so drift is computed from the snapshot too.
         "live_hypridle": conf.read_text() if conf.exists() else None,
         # Rendered here, not in report: it needs our own path and the
         # resolved binaries, both of which are facts about this machine.
@@ -298,7 +293,6 @@ def read(pol: dict) -> dict:
     }
 
 
-# --- writing the artifacts -------------------------------------------------
 
 def apply_session(restart: bool = True) -> Path:
     """Write the hypridle config and point hypridle at it.
@@ -364,7 +358,6 @@ def sudo_apply_system() -> int:
     return subprocess.run(["sudo", exe(), "apply", "--system"]).returncode
 
 
-# --- performing actions ----------------------------------------------------
 
 def runtime_dir() -> Path:
     """One save location shared by BOTH privilege levels.
@@ -376,7 +369,7 @@ def runtime_dir() -> Path:
     d = Path("/run/hyprpower")
     if not d.exists():
         d.mkdir()
-        os.chmod(d, 0o1777)   # sticky, like /tmp
+        os.chmod(d, 0o1777)
     return d
 
 
@@ -413,19 +406,19 @@ def cmd_on(src: str) -> int:
 
 def cmd_do(action: str) -> int:
     pol = load()
-    if action in ("dim", "backlight-off"):
+    if action in (policy.Action.DIM, policy.Action.BACKLIGHT_OFF):
         save_brightness()
         run("brightnessctl", "--quiet", "set",
-            pol["display"]["dim_to"] if action == "dim" else "0")
-    elif action == "display-off":
+            pol["display"]["dim_to"] if action == policy.Action.DIM else "0")
+    elif action == policy.Action.DISPLAY_OFF:
         # Opt-in only: a dpms-off listener crashed the whole Hyprland session
         # on 0.55.x (SIGABRT -> greetd relogin).
         run("hyprctl", "dispatch", "dpms", "off")
-    elif action == "lock":
+    elif action == policy.Action.LOCK:
         run("loginctl", "lock-session")
-    elif action in ("suspend", "hibernate", "shutdown"):
+    elif action in policy.SYSTEMCTL:
         run("systemctl", policy.systemd_sleep(pol, source(), action))
-    elif action == "restore":
+    elif action == policy.Action.RESTORE:
         # Brightness first: it always applies and must not be blocked by
         # hyprctl failing. dpms only when the display-off rung is configured
         # at all -- that rung leaves the panel powered down, so restoring
@@ -440,15 +433,15 @@ def cmd_do(action: str) -> int:
     return 0
 
 
-# --- hardware events -------------------------------------------------------
 
 # One press emits two ACPI events on this hardware (PBTN and PWRF), so
 # without this the action runs twice and the second gets "suspend already in
 # progress". Observed 2026-09-26.
 DEBOUNCE_SECONDS = 3
 
-SLEEPS = ("suspend", "hibernate", "shutdown")
-EVENT_ACTIONS = {"lock": ["loginctl", "lock-sessions"], "ignore": None}
+# Actions a hardware event can trigger that are not handed to systemctl.
+EVENT_ACTIONS = {policy.Action.LOCK: ["loginctl", "lock-sessions"],
+                 policy.Action.IGNORE: None}
 
 
 def latch() -> Path:
@@ -465,7 +458,7 @@ def debounced(name: str, secs: int = DEBOUNCE_SECONDS) -> bool:
 
 
 def run_action(pol: dict, name: str) -> None:
-    if name in SLEEPS:
+    if name in policy.SYSTEMCTL:
         run("systemctl", policy.systemd_sleep(pol, source(), name))
     elif name in EVENT_ACTIONS:
         if cmd := EVENT_ACTIONS[name]:   # "ignore" maps to None on purpose

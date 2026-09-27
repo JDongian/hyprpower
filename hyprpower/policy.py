@@ -14,36 +14,70 @@ from __future__ import annotations
 
 import re
 import tomllib
+from enum import StrEnum
+from typing import NamedTuple
 
-SOURCES = ("ac", "battery")
+class Source(StrEnum):
+    """The condition every setting splits on. StrEnum so these ARE the keys
+    used in profile.toml and no conversion is needed at the boundary."""
+    AC = "ac"
+    BATTERY = "battery"
 
-# (policy key, emitted action, does activity undo it)
-STEPS = [("dim", "dim", True),
-         ("backlight_off", "backlight-off", True),
-         ("display_off", "display-off", True),
-         ("lock", "lock", False),
-         ("suspend", "suspend", False),
-         ("hibernate", "hibernate", False)]
 
-ROW = {action: f"idle.{key}" for key, action, _ in STEPS}
+SOURCES = tuple(Source)
 
-# Does the machine survive the battery running out in it, on its own.
-SLEEP = {"suspend": False, "hibernate": True}
 
-# systemd's names for our actions. The ONLY place systemd vocabulary appears:
-# policy says suspend / hibernate / shutdown and nothing else.
-SYSTEMD = {"shutdown": "poweroff"}
+class Action(StrEnum):
+    """The whole vocabulary. Nothing outside this list is a valid action, in
+    the profile or on the `hyprpower do` command line."""
+    IGNORE = "ignore"
+    DIM = "dim"
+    BACKLIGHT_OFF = "backlight-off"
+    DISPLAY_OFF = "display-off"
+    RESTORE = "restore"
+    LOCK = "lock"
+    SUSPEND = "suspend"          # to RAM
+    HIBERNATE = "hibernate"      # to disk
+    SHUTDOWN = "shutdown"
+
+
+# Actions that put the machine to sleep, and the subset that survives the
+# battery running out while it is there.
+SLEEPS = frozenset({Action.SUSPEND, Action.HIBERNATE})
+REACHES_DISK = frozenset({Action.HIBERNATE})
+
+# Dispatched by handing the name to systemctl.
+SYSTEMCTL = SLEEPS | {Action.SHUTDOWN}
+
+# The only place systemd vocabulary appears.
+SYSTEMD = {Action.SHUTDOWN: "poweroff"}
+
+
+class Step(NamedTuple):
+    key: str            # the [idle.<key>] section it is configured under
+    action: Action
+    restores: bool      # activity undoes it, so the listener gets on-resume
+
+
+STEPS = [Step("dim", Action.DIM, True),
+         Step("backlight_off", Action.BACKLIGHT_OFF, True),
+         Step("display_off", Action.DISPLAY_OFF, True),
+         Step("lock", Action.LOCK, False),
+         Step("suspend", Action.SUSPEND, False),
+         Step("hibernate", Action.HIBERNATE, False)]
+
+ROW = {s.action: f"idle.{s.key}" for s in STEPS}
 
 # Every key that must be present. hyprpower holds no values of its own, so a
-# missing one is an error that names itself rather than a KeyError mid-render.
+# missing key is an error, not a default.
 REQUIRED = (
     [("display", "dim_to"), ("lock", "unit"), ("lock", "restart_on_resume"),
      ("lid", "docked"), ("lid", "ac"), ("lid", "battery"),
      ("battery", "charge", "start"), ("battery", "charge", "stop"),
      ("battery", "low", "backlight_off"), ("battery", "low", "hibernate"),
      ("battery", "low", "poll")]
-    + [("idle", k, s) for k, _, _ in STEPS for s in SOURCES]
-    + [("button", b, s) for b in ("power", "power_held") for s in SOURCES]
+    + [("idle", s.key, src) for s in STEPS for src in SOURCES]
+    + [("button", b, src) for b in ("power", "power_held") for src in SOURCES]
 )
 
 _MISSING = object()
@@ -88,7 +122,7 @@ def escalates(pol: dict, source: str) -> bool:
 
 def systemd_sleep(pol: dict, source: str, action: str) -> str:
     """systemd's name for an action, never policy's."""
-    if action == "suspend" and escalates(pol, source):
+    if action == Action.SUSPEND and escalates(pol, source):
         return "suspend-then-hibernate"
     return SYSTEMD.get(action, action)
 
@@ -102,11 +136,12 @@ def rungs(pol: dict) -> list[tuple[int, str, str, bool]]:
     """
     out = []
     for source in SOURCES:
-        at = {key: seconds(pol["idle"][key][source]) for key, _a, _r in STEPS}
-        for key, action, restores in STEPS:
-            if at[key] is None or (key == "hibernate" and escalates(pol, source)):
+        at = {s.key: seconds(pol["idle"][s.key][source]) for s in STEPS}
+        for st in STEPS:
+            if at[st.key] is None or (st.action is Action.HIBERNATE
+                                      and escalates(pol, source)):
                 continue
-            out.append((at[key], source, action, restores))
+            out.append((at[st.key], source, st.action, st.restores))
     return sorted(out)
 
 
@@ -142,7 +177,6 @@ def hibernate_delay(pol: dict) -> int | None:
     return gaps.pop() if len(gaps) == 1 else None
 
 
-# --- compiled artifacts ----------------------------------------------------
 
 def general(pol: dict, bins: dict) -> str:
     """The hypridle `general` block.
