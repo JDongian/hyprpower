@@ -6,7 +6,7 @@ it was written on NixOS, where `makepkg` does not exist.
 Before submitting:
 
 1. `makepkg -si` on Arch, and fix whatever breaks.
-2. Replace `sha256sums=('SKIP')` with `updpkgsums`.
+2. Re-run `updpkgsums` if you retag.
 3. Check `hyprpower` starts and `hyprpower verify` reports sensibly.
 
 Note what the package does **not** install: the hypridle unit, the acpid

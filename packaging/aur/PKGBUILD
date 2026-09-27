@@ -21,7 +21,7 @@ optdepends=('tlp: shows the hardware tunables TLP owns, read-only'
             'upower: battery details')
 makedepends=('python-build' 'python-installer' 'python-wheel' 'python-setuptools')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
-sha256sums=('SKIP')   # replace with the real digest before submitting
+sha256sums=('66817e352cbd4cb7a3d050835dc6defd92dbfaddb23de531189ca4fe6b8f1e6d')
 
 build() {
   cd "$pkgname-$pkgver"
