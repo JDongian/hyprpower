@@ -268,9 +268,8 @@ def flags(pol, st, shown):
         add("This sleep never reaches disk, so the battery can run flat.",
             *sorted(volatile), "idle.hibernate")
 
-    if st["suspend_mode"] == "s2idle" and "deep" in st["suspend_modes"]:
-        add("Suspend uses s2idle. deep is available but untested here.",
-            "susp.mode", "susp.all")
+    # s2idle vs deep is a row, not a finding: hibernate bounds the drain
+    # either way.
     if not st["hypridle"]:
         add("hypridle is not running, so no idle action happens.",
             "svc.hypridle", "idle.dim", "idle.lock")
