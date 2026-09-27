@@ -82,7 +82,8 @@ REQUIRED = tuple(
     [("display", "dim_to"), ("lock", "unit"), ("lock", "restart_on_resume"),
      ("lid", "docked"), ("lid", "ac"), ("lid", "battery"),
      ("battery", "charge", "start"), ("battery", "charge", "stop"),
-     ("battery", "low", "backlight_off"), ("battery", "low", "hibernate"),
+     ("battery", "low", "dim"), ("battery", "low", "backlight_off"),
+     ("battery", "low", "hibernate"),
      ("battery", "low", "poll")]
     + [("idle", s.key, src) for s in STEPS for src in SOURCES]
     + [("button", b, src) for b in ("power", "power_held") for src in SOURCES]
@@ -255,7 +256,8 @@ def logind_want(pol: dict) -> dict[str, str]:
         "HandleLidSwitchExternalPower": systemd_sleep(pol, "ac", pol["lid"]["ac"]),
         "HandleLidSwitch": systemd_sleep(pol, "battery", pol["lid"]["battery"]),
         # docked is orthogonal to the power source, so no escalation applies.
-        "HandleLidSwitchDocked": SYSTEMD.get(pol["lid"]["docked"], pol["lid"]["docked"]),
+        "HandleLidSwitchDocked": SYSTEMD.get(pol["lid"]["docked"],
+                                             pol["lid"]["docked"]),
     }
 
 

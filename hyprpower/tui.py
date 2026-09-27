@@ -23,7 +23,7 @@ from textual.widgets import (DataTable, Footer, Input, Label, ListItem,
 
 from textual.screen import ModalScreen
 
-from . import report, system
+from . import system
 from .report import EDITABLE, build, coerce, current, pending, problems
 
 HL = "bold black on yellow"

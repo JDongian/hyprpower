@@ -91,6 +91,9 @@ def secs(v) -> str:
 
 
 def pct(v) -> str:
+    """false means the step is off, the same as it does for a duration."""
+    if v is False:
+        return "never"
     return "—" if v is None else f"{v}%"
 
 
@@ -141,7 +144,8 @@ def problems(pol: dict, st: dict) -> list[str]:
     if charge_drift(pol, st):
         out.append("Charge thresholds do not match the profile. Apply to fix.")
     if policy.sleep_text(pol) != st["live_sleep"]:
-        out.append("Hibernate delay in systemd does not match the profile. Apply to fix.")
+        out.append("Hibernate delay in systemd does not match the profile. "
+                   "Apply to fix.")
     return out
 
 
@@ -154,7 +158,8 @@ def flags(pol, st, shown):
 
     # Over the emitted listeners, not the raw policy: a hibernate that
     # follows a suspend is dropped, because systemd performs that escalation.
-    by_source = {src: sorted((r.after, r.action) for r in policy.rungs(pol) if r.source == src)
+    by_source = {src: sorted((r.after, r.action)
+                             for r in policy.rungs(pol) if r.source == src)
                  for src in policy.SOURCES}
     if not any(a in policy.SLEEPS for rs in by_source.values() for _t, a in rs):
         add("Never suspends or hibernates when idle. Stays awake until you close "
@@ -228,7 +233,8 @@ def build(pol: dict, st: dict):
     both = lambda k: [pol[k]["ac"], pol[k]["battery"]]
 
     status = [
-        r("now.source", "Power source", ["Plugged in" if st["on_ac"] else "On battery"]),
+        r("now.source", "Power source",
+          ["Plugged in" if st["on_ac"] else "On battery"]),
         r("now.charge", "Battery level", [f'{st["percent"]}%']),
         r("now.status", "Charging status", [st["status"]]),
         # power_now is the CHARGE rate when plugged in and the DISCHARGE rate
@@ -237,7 +243,8 @@ def build(pol: dict, st: dict):
         r("now.rate", RATE_LABEL.get(st["status"], "Battery power flow"),
           [f'{st["watts"]:.1f} W' if st["watts"] else "—"]),
         r("now.backlight", "Display brightness",
-          [f'{st["bl_now"]}/{st["bl_max"]} ({100 * st["bl_now"] / st["bl_max"]:.0f}%)']),
+          [f'{st["bl_now"]}/{st["bl_max"]} '
+           f'({100 * st["bl_now"] / st["bl_max"]:.0f}%)']),
         r("now.cycles", "Cycle count", [st["cycles"]]),
         r("now.health", "Battery health",
           [f'{health:.1f}%  ({st["energy_full"]:.1f}/{st["energy_design"]:.1f} Wh)'],
@@ -296,7 +303,8 @@ def build(pol: dict, st: dict):
                         detail=detail))
     ch, chg = pol["battery"]["low"], pol["battery"]["charge"]
     charge = [
-        r("low.screen_off", "Turn off backlight + lock at",
+        r("low.dim", "Dim display at", [pct(ch["dim"])]),
+        r("low.backlight_off", "Turn off backlight at",
           [pct(ch["backlight_off"])]),
         r("low.hibernate", "Hibernate at", [pct(ch["hibernate"])]),
         r("low.poll", "Battery level checked every", [ch["poll"]]),
@@ -363,7 +371,8 @@ EDITABLE: dict[tuple[str, int], tuple[str, ...]] = {
     ("key.power_held", Col.BATTERY): ("button", "power_held", "battery"),
     ("chg.start", Col.ONLY): ("battery", "charge", "start"),
     ("chg.stop", Col.ONLY): ("battery", "charge", "stop"),
-    ("low.screen_off", Col.ONLY): ("battery", "low", "backlight_off"),
+    ("low.dim", Col.ONLY): ("battery", "low", "dim"),
+    ("low.backlight_off", Col.ONLY): ("battery", "low", "backlight_off"),
     ("low.hibernate", Col.ONLY): ("battery", "low", "hibernate"),
     ("low.poll", Col.ONLY): ("battery", "low", "poll"),
 }

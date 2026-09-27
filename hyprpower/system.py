@@ -486,22 +486,42 @@ def ev_power() -> int:
 
 
 def ev_charge() -> int:
-    """The low-battery ladder, over descending charge."""
+    """The low-battery ladder, over descending charge.
+
+    Each step is independently disableable with false, so the deepest one
+    whose threshold the charge has reached wins. An earlier version keyed the
+    whole ladder off the first step, which meant turning that one off
+    silently disabled the ones below it.
+
+    The latch holds which step is applied, not merely that one is: it has to
+    know whether to escalate dim -> off, and must not re-apply on every poll.
+    """
     low = load()["battery"]["low"]
     cap = int(slurp(f"{battery()}/capacity"))
-    if on_ac() or cap > low["backlight_off"]:
-        if latch().exists():
-            latch().unlink()
-            cmd_do("restore")
-        return 0
-    if cap <= low["hibernate"]:
+    reached = lambda k: low[k] is not False and cap <= low[k]
+
+    if not on_ac() and reached("hibernate"):
         # The one deliberate fallback here: a refused hibernate must not
         # leave a nearly-flat battery awake.
         if subprocess.run(["systemctl", "hibernate"], check=False).returncode:
             run("systemctl", "suspend")
         return 0
-    if not latch().exists():
-        latch().touch()
-        run("loginctl", "lock-sessions")
-        cmd_do("backlight-off")
+
+    step = None
+    if not on_ac():                             # deepest first
+        for key, action in (("backlight_off", policy.Action.BACKLIGHT_OFF),
+                            ("dim", policy.Action.DIM)):
+            if reached(key):
+                step = action
+                break
+
+    if step is None:
+        if latch().exists():
+            latch().unlink()
+            cmd_do(policy.Action.RESTORE)
+        return 0
+
+    if (latch().read_text().strip() if latch().exists() else None) != step:
+        latch().write_text(step)
+        cmd_do(step)
     return 0

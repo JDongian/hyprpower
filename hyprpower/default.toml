@@ -95,6 +95,7 @@ stop  = 80     # stop charging at this: holding 100% ages the cell faster,
 # What happens as the battery drains. Trigger is charge level, not time, and
 # only applies on battery by definition.
 [battery.low]
-poll          = "1m"
+dim           = 15     # first warning: you can still see the screen
 backlight_off = 6      # park the screen, keep polling
 hibernate     = 5      # the save-your-work action
+poll          = "1m"
