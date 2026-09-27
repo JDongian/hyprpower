@@ -7,6 +7,8 @@ comment in the file.
 
 from __future__ import annotations
 
+import os
+
 import tomlkit
 
 from . import policy
@@ -50,10 +52,23 @@ def current(path: tuple[str, ...]):
 
 
 def write(path: tuple[str, ...], value) -> None:
-    # NOT resolve(): profile.toml ships as a symlink to default.toml, and
-    # renaming onto the link is what detaches it. Copy-on-write -- the first
-    # edit gives you your own file and leaves the shipped default alone.
-    file = policy.path()
+    # resolve() so a symlinked profile is written THROUGH, not replaced.
+    # ~/.config/hyprpower/profile.toml may point into a dotfiles or NixOS
+    # repo; an atomic rename onto the link would swap it for a regular file
+    # and edits would silently stop reaching the versioned copy.
+    file = policy.path().resolve()
+    if str(file).startswith("/nix/store/"):
+        raise SystemExit(
+            f"{policy.path()} resolves into the read-only store ({file}).\n"
+            f"  home.file generates store symlinks; use "
+            f"config.lib.file.mkOutOfStoreSymlink, or a plain file.")
+    # The tmp file is written beside the target, so the DIRECTORY must be
+    # writable, not just the file. Pointing the profile into a repo you do
+    # not own is an easy way to get this wrong.
+    if not os.access(file.parent, os.W_OK):
+        raise SystemExit(f"cannot write {file.parent} as {os.getlogin()}; "
+                         f"the profile resolves there and edits need it "
+                         f"writable")
     doc = tomlkit.parse(file.read_text())
     node = doc
     for key in path[:-1]:

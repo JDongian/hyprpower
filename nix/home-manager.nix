@@ -34,12 +34,30 @@ in
       description = "Used when `checkout` is null.";
     };
 
+    profileSource = lib.mkOption {
+      type = lib.types.nullOr lib.types.str;
+      default = null;
+      example = "/etc/nixos/hyprpower/profile.toml";
+      description = ''
+        Absolute path to a profile you keep under version control. When set,
+        ~/.config/hyprpower/profile.toml becomes a symlink to it and the TUI
+        writes through, so edits land in your repo and a fresh machine
+        rebuilds with your policy rather than the shipped default.
+
+        mkOutOfStoreSymlink, not home.file: home.file would copy it into the
+        store and the result would be read-only.
+
+        This is a convenience, not a requirement -- `ln -s` does the same
+        thing, which is why hyprpower only ever knows the one XDG path.
+      '';
+    };
+
     seedProfile = lib.mkOption {
       type = lib.types.bool;
       default = true;
       description = ''
         Copy the shipped default to ~/.config/hyprpower/profile.toml when no
-        profile exists yet. A copy, not a link: the TUI writes to this file,
+        profile exists yet. Ignored when profileSource is set. A copy, not a link: the TUI writes to this file,
         so home-manager cannot generate it -- anything it generates is a
         read-only /nix/store symlink.
       '';
@@ -72,7 +90,12 @@ in
         '');
     };
 
-    home.activation.hyprpowerProfile = lib.mkIf cfg.seedProfile
+    xdg.configFile."hyprpower/profile.toml" = lib.mkIf (cfg.profileSource != null) {
+      source = config.lib.file.mkOutOfStoreSymlink cfg.profileSource;
+    };
+
+    home.activation.hyprpowerProfile =
+      lib.mkIf (cfg.seedProfile && cfg.profileSource == null)
       (lib.hm.dag.entryAfter [ "writeBoundary" ] ''
         p="''${XDG_CONFIG_HOME:-$HOME/.config}/hyprpower/profile.toml"
         if [ ! -e "$p" ]; then
