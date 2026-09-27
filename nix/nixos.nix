@@ -8,11 +8,9 @@
 
 let
   cfg = config.services.hyprpower;
-  # acpid and the timer run as root, where HOME is /root and the policy would
-  # not be found -- so every call names the file explicitly.
-  run = args: ''
-    HYPRPOWER_POLICY=${cfg.policyFile} ${cfg.exe} ${args}
-  '';
+  # These run as root, where HOME is /root, so the profile must be named
+  # explicitly or they would look under /root/.config and find nothing.
+  run = args: "HYPRPOWER_POLICY=${cfg.policyFile} ${cfg.exe} ${args}\n";
 in
 {
   options.services.hyprpower = {
@@ -20,8 +18,11 @@ in
 
     policyFile = lib.mkOption {
       type = lib.types.str;
-      example = "/home/you/projects/hyprpower/config/policy.toml";
-      description = "Absolute path to policy.toml, as seen by root.";
+      example = "/home/you/.config/hyprpower/profile.toml";
+      description = ''
+        Absolute path to the profile these root units should read, i.e. the
+        one belonging to the user whose session this manages.
+      '';
     };
 
     exe = lib.mkOption {

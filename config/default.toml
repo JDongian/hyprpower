@@ -1,12 +1,10 @@
-# Default hyprpower policy. Adopt it with:
+# The shipped default. config/profile.toml is the one that is read; start
+# from a copy of this and edit it:
 #
-#     cp config/presets/default.toml ~/.config/hyprpower/policy.toml
-#     hyprpower apply && sudo hyprpower apply --system
+#     cp config/default.toml config/profile.toml
 #
-# Every key must be present: hyprpower holds no values of its own, so a file
+# Every key must be present. hyprpower holds no values of its own, so a file
 # like this is the only place a default can live.
-#
-# The single source of truth for what the laptop does.
 #
 # Everything is "on TRIGGER, if on AC or on battery, do ACTION". The daemons
 # are dispatchers; none of them owns a decision:

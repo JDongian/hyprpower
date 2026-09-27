@@ -4,3 +4,4 @@ __pycache__/
 result
 dist/
 *.egg-info/
+config/profile.toml

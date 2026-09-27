@@ -1,8 +1,12 @@
 # home-manager module: the session half of hyprpower.
 #
-# Owns the three things that must run as the user -- the policy file, the
-# executable, and the hypridle unit that calls back into it. The system half
-# (logind, charge thresholds, ACPI events) is nix/nixos.nix.
+# Owns the two things that must run as the user: the executable and the
+# hypridle unit that calls back into it. The system half (logind, charge
+# thresholds, ACPI events) is nix/nixos.nix.
+#
+# It does NOT place the config. hyprpower reads config/profile.toml next to
+# its own code, so nothing here has to link a file into ~/.config -- which is
+# what previously made home-manager mandatory rather than a convenience.
 { config, lib, pkgs, ... }:
 
 let
@@ -12,17 +16,6 @@ in
 {
   options.programs.hyprpower = {
     enable = lib.mkEnableOption "the hyprpower idle and power policy";
-
-    policyFile = lib.mkOption {
-      type = lib.types.str;
-      example = "/home/you/projects/hyprpower/config/policy.toml";
-      description = ''
-        Absolute path to your policy.toml. It is symlinked into
-        ~/.config/hyprpower/ with mkOutOfStoreSymlink, NOT home.file:
-        home.file would make it a read-only /nix/store symlink and the TUI
-        could never write to it.
-      '';
-    };
 
     checkout = lib.mkOption {
       type = lib.types.nullOr lib.types.str;
@@ -40,12 +33,20 @@ in
       default = pkgs.callPackage ./package.nix { };
       description = "Used when `checkout` is null.";
     };
+
+    seedProfile = lib.mkOption {
+      type = lib.types.bool;
+      default = true;
+      description = ''
+        Copy the shipped default to ~/.config/hyprpower/profile.toml when no
+        profile exists yet. A copy, not a link: the TUI writes to this file,
+        so home-manager cannot generate it -- anything it generates is a
+        read-only /nix/store symlink.
+      '';
+    };
   };
 
   config = lib.mkIf cfg.enable {
-    xdg.configFile."hyprpower/policy.toml".source =
-      config.lib.file.mkOutOfStoreSymlink cfg.policyFile;
-
     # A wrapper rather than plain `package` on PATH, for two reasons that both
     # cost real debugging:
     #
@@ -70,6 +71,16 @@ in
           exec ${lib.getExe cfg.package} "$@"
         '');
     };
+
+    home.activation.hyprpowerProfile = lib.mkIf cfg.seedProfile
+      (lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+        p="''${XDG_CONFIG_HOME:-$HOME/.config}/hyprpower/profile.toml"
+        if [ ! -e "$p" ]; then
+          run mkdir -p "$(dirname "$p")"
+          run cp ${../config/default.toml} "$p"
+          run chmod u+w "$p"
+        fi
+      '');
 
     # Replaces services.hypridle.enable, whose unit cannot take -c. If you
     # also enable programs.hyprlock, set services.hypridle.enable to

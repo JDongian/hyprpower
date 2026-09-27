@@ -50,11 +50,10 @@ def current(path: tuple[str, ...]):
 
 
 def write(path: tuple[str, ...], value) -> None:
-    # resolve() first: policy.toml is a mkOutOfStoreSymlink into the git repo,
-    # and an atomic rename onto the LINK replaces the link with a regular
-    # file -- edits would stop reaching the repo and home-manager would
-    # later refuse to manage the path. Write the target instead.
-    file = policy.path().resolve()
+    # NOT resolve(): profile.toml ships as a symlink to default.toml, and
+    # renaming onto the link is what detaches it. Copy-on-write -- the first
+    # edit gives you your own file and leaves the shipped default alone.
+    file = policy.path()
     doc = tomlkit.parse(file.read_text())
     node = doc
     for key in path[:-1]:

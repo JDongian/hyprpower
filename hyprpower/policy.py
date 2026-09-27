@@ -72,14 +72,31 @@ def which(binary: str) -> str:
 
 
 def path() -> Path:
+    """The active profile: $XDG_CONFIG_HOME/hyprpower/profile.toml.
+
+    Owned by you, not by the packaging. home-manager generating it would make
+    it a read-only /nix/store symlink that the TUI could never write, which is
+    the whole reason it is not managed declaratively.
+
+    HYPRPOWER_POLICY overrides it, and root callers need that: acpid and the
+    battery timer run with HOME=/root and cannot find your config otherwise.
+    """
     if env := os.environ.get("HYPRPOWER_POLICY"):
         return Path(env)
     base = os.environ.get("XDG_CONFIG_HOME") or os.path.expanduser("~/.config")
-    return Path(base) / "hyprpower" / "policy.toml"
+    return Path(base) / "hyprpower" / "profile.toml"
+
+
+def default_path() -> Path:
+    return Path(__file__).resolve().parent.parent / "config" / "default.toml"
 
 
 def load(p: Path | None = None) -> dict:
-    return tomllib.loads((p or path()).read_text())
+    f = p or path()
+    if not f.exists():
+        raise SystemExit(f"no profile at {f}\n"
+                         f"  mkdir -p {f.parent} && cp {default_path()} {f}")
+    return tomllib.loads(f.read_text())
 
 
 def seconds(v) -> int | None:
