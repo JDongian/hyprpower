@@ -15,6 +15,7 @@
         build-system = [ pkgs.python3Packages.setuptools ];
         dependencies = with pkgs.python3Packages; [ textual tomlkit ];
         doCheck = false;
+        meta.license = nixpkgs.lib.licenses.mit;
       };
     in {
       # hyprpower reads the running system, so it needs no build-time

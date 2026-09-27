@@ -6,8 +6,12 @@ build-backend = "setuptools.build_meta"
 name = "hyprpower"
 version = "0.1.0"
 description = "See every power setting on a Linux laptop in one place, next to what macOS and Windows would do."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "Joshua Dong", email = "jdong42@gmail.com" }]
 requires-python = ">=3.11"
-dependencies = ["textual>=0.80"]
+dependencies = ["textual>=0.80", "tomlkit"]
 
 [project.scripts]
 hyprpower = "hyprpower.cli:main"
