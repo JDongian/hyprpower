@@ -100,8 +100,7 @@ programs.hyprpower.profileSource = "/etc/nixos/hyprpower/profile.toml";
 
 ## What it touches
 
-hyprpower is unprivileged and refuses to run as root. Only `apply --system`
-escalates, and it writes three things:
+Only `apply --system` needs root. It writes three things:
 
 ```
 /etc/systemd/logind.conf.d/50-hyprpower.conf   lid, HandlePowerKey=ignore

@@ -325,6 +325,10 @@ def main() -> None:
     # write ~/.config and drive the user's hypridle), but applying needs root
     # for the logind drop-in and the charge thresholds. Caching the credential
     # here means the apply never stops to ask.
+    # Not a privilege boundary -- root is simply broken here. HOME becomes
+    # /root so the profile is not found, and there is no user bus, so
+    # hypridle can be neither read nor restarted. Fail with the reason
+    # rather than showing an empty screen.
     if os.geteuid() == 0:
         print("run hyprpower as your own user, not root: as root there is no "
               "user bus, so hypridle cannot be read or restarted. It escalates "
