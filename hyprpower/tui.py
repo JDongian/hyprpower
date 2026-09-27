@@ -1,4 +1,4 @@
-"""Four tabs, with a sub-tab per system where a comparison exists.
+"""Four tabs over the policy and the machine it runs on.
 
 Selecting a flag highlights every row that produced it, across all tabs.
 The flags already carry their dependency row ids, so this is presentation
@@ -22,7 +22,7 @@ from textual.screen import ModalScreen
 
 from .edit import EDITABLE, coerce, current, write
 from .verify import pending, problems
-from .view import SYSTEMS, build
+from .view import build
 
 HL = "bold black on yellow"
 
@@ -52,14 +52,12 @@ class HyprPower(App):
         self.pending = {rid: rest for rid, *rest in
                         ((p[0], p[1], p[2], p[3]) for p in pending())}
         self.problems = problems()
-        # One entry per place a row is drawn: the same id appears once per
-        # system sub-tab.
+        # One entry per place a row is drawn.
         self._rows: dict[str, list[tuple[DataTable, str, str]]] = {}
         self._labels: list[Label] = []
         # Remembered across recompose: an edit that dumped you back on tab 1
         # made editing several values in a row miserable.
         self._active_tab: str | None = None
-        self._system_index: int = 0
         # So selecting a flag can mark the tabs holding its evidence.
         self._row_tabs: dict[str, set[str]] = {}
         self._titles: dict[str, str] = {}
@@ -75,20 +73,12 @@ class HyprPower(App):
         # `initial` rather than setting .active after recompose: a post-hoc
         # assignment runs before the new panes exist and is silently lost.
         with TabbedContent(id="main", initial=self._active_tab or "tab0"):
-            for n, (title, sheets, compare) in enumerate(self.panels):
+            for n, (title, sheets) in enumerate(self.panels):
                 tab_id = f"tab{n}"
                 self._titles[tab_id] = title
                 with TabPane(title, id=tab_id):
                     with VerticalScroll():
-                        if compare:
-                            with TabbedContent(
-                                    id=f"sub{n}",
-                                    initial=f"sub{n}-{self._system_index}"):
-                                for system in SYSTEMS:
-                                    with TabPane(system, id=f"sub{n}-{SYSTEMS.index(system)}"):
-                                        yield from self._sheets(sheets, system, tab_id)
-                        else:
-                            yield from self._sheets(sheets, "this machine", tab_id)
+                        yield from self._sheets(sheets, tab_id)
         yield Footer()
 
     def _flag_text(self, i: int) -> Text:
@@ -140,14 +130,12 @@ class HyprPower(App):
     def _remember_position(self) -> None:
         tabs = self.query_one("#main", TabbedContent)
         self._active_tab = tabs.active
-        for sub in self.query(TabbedContent):
-            if sub.id and sub.id.startswith("sub") and sub.active:
-                self._system_index = int(sub.active.rsplit("-", 1)[1])
+
 
     def _restore_position(self) -> None:
         self.query_one("#flags", ListView).focus()
 
-    def _sheets(self, sheets, system, tab_id):
+    def _sheets(self, sheets, tab_id):
         for subtitle, headers, rows in sheets:
             if subtitle:
                 yield Static(subtitle, classes="sub")
@@ -160,14 +148,12 @@ class HyprPower(App):
                 if row is None:
                     table.add_row("", *[""] * len(headers))
                     continue
-                rid, label, cells, detail = row
-                values = cells.get(system) or ["—"] * len(headers)
-                key = f"{rid}@{system}"
-                mark = "* " if rid in self.pending and system == "this machine" else "  "
-                table.add_row(f"{mark}{label}", *[str(v) for v in values], key=key)
-                self._rows.setdefault(rid, []).append((table, key, label))
+                rid, label, values, detail = row
+                mark = "* " if rid in self.pending else "  "
+                table.add_row(f"{mark}{label}", *values, key=rid)
+                self._rows.setdefault(rid, []).append((table, rid, label))
                 self._row_tabs.setdefault(rid, set()).add(tab_id)
-                if detail and system == "this machine":
+                if detail:
                     table.add_row(Text(f"    └ {detail}", style="dim italic"),
                                   *[""] * len(headers))
             # Explicit height: DataTable's `height: auto` does not resolve for
@@ -216,18 +202,15 @@ class HyprPower(App):
     def action_edit(self) -> None:
         """Edit the policy value under the cursor.
 
-        Only the "this machine" column is editable: the macOS and Windows
-        columns are reference data, and TLP/state rows are owned elsewhere.
+        Only policy rows are editable; TLP and live-state rows are owned
+        elsewhere.
         """
         table = self.focused
         if not isinstance(table, DataTable):
             self.notify("select a cell in a table first (tab to move focus)")
             return
         row_key, col = table.coordinate_to_cell_key(table.cursor_coordinate)
-        rid, _, system = str(row_key.value).partition("@")
-        if system != "this machine":
-            self.notify("only this machine's values are editable")
-            return
+        rid = str(row_key.value)
         column = table.cursor_coordinate.column - 1     # column 0 is the label
         path = EDITABLE.get((rid, column))
         if path is None:

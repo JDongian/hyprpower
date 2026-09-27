@@ -13,19 +13,17 @@ from __future__ import annotations
 
 from . import apply, policy, probe
 
-SYSTEMS = ("this machine", "macOS", "Windows")
 ONE, TWO = [""], ["Plugged in", "On battery"]
-NEVER, VARIES, ON_SUSPEND = "never", "varies", "on suspend"
 
-# (row label, policy key, macOS ac/bat, Windows ac/bat). Module level so the
-# flags can cite a rung by the label the UI actually shows.
-LADDER = [("Dim display after", "dim", (585, 105), (300, 120)),
-          ("Turn off backlight after", "backlight_off", (600, 120), (300, 180)),
-          ("Turn off display after", "display_off", (None, None), (None, None)),
-          ("Lock after", "lock", (600, 120), (ON_SUSPEND, ON_SUSPEND)),
-          ("Suspend after", "suspend", (NEVER, VARIES), (900, 600)),
-          ("Hibernate after", "hibernate", (10800, 10800), (NEVER, VARIES))]
-LABEL = {key: label for label, key, _m, _w in LADDER}
+# (row label, policy key). Module level so the flags can cite a rung by the
+# label the UI actually shows.
+LADDER = [("Dim display after", "dim"),
+          ("Turn off backlight after", "backlight_off"),
+          ("Turn off display after", "display_off"),
+          ("Lock after", "lock"),
+          ("Suspend after", "suspend"),
+          ("Hibernate after", "hibernate")]
+LABEL = {key: label for label, key in LADDER}
 RATE_LABEL = {"Discharging": "Discharge rate", "Charging": "Charge rate"}
 
 # TLP has ~59 settings. Grouped by what each controls, most consequential
@@ -51,7 +49,7 @@ def tlp_group(key: str) -> str:
 
 def secs(v) -> str:
     if v is None or v is False:
-        return NEVER
+        return "never"
     if isinstance(v, str):
         return v if not v[0].isdigit() else secs(policy.seconds(v))
     m, s = divmod(int(v), 60)
@@ -69,15 +67,11 @@ class Build:
         self.pol, self.st = pol, st
         self.shown: dict[str, tuple[str, str]] = {}
 
-    def row(self, rid, label, values, mac=None, win=None, detail=None):
-        n = len(values)
-        fill = lambda v: [v] * n if not isinstance(v, (list, tuple)) else list(v)
-        cells = {"this machine": [str(v) for v in values],
-                 "macOS": [str(v) for v in fill(mac if mac is not None else "—")],
-                 "Windows": [str(v) for v in fill(win if win is not None else "—")]}
+    def row(self, rid, label, values, detail=None):
+        cells = [str(v) for v in values]
         # Every column, not just the first: a flag about the battery column
         # was citing the plugged-in value.
-        self.shown[rid] = (label, " / ".join(cells["this machine"]))
+        self.shown[rid] = (label, " / ".join(cells))
         return (rid, label, cells, detail)
 
 
@@ -139,11 +133,10 @@ def build(pol: dict | None = None, st: dict | None = None):
     # --- 2. Hardware -----------------------------------------------------
     press = [
         r("key.power", "Power button action",
-          [pol["button"]["power"]["ac"], pol["button"]["power"]["battery"]],
-          mac="suspend", win="suspend"),
+          [pol["button"]["power"]["ac"], pol["button"]["power"]["battery"]]),
         r("key.power_held", "Power button action (press and hold)",
           [pol["button"]["power_held"]["ac"], pol["button"]["power_held"]["battery"]]),
-        r("lid.close", "Lid close action", both("lid"), mac="suspend", win="suspend"),
+        r("lid.close", "Lid close action", both("lid")),
     ]
     # Rows, not columns: the lid's axis is {docked, AC, battery} with docked
     # winning, so it is not the two-valued power-source split used above.
@@ -157,21 +150,18 @@ def build(pol: dict | None = None, st: dict | None = None):
 
     # --- 3. Power management --------------------------------------------
     ladder = []
-    for label, key, mac, win in LADDER:
+    for label, key in LADDER:
         detail = None
         if key == "dim":
             detail = f'to {disp["dim_to"]}'
-        elif key == "backlight_off":
-            detail = f'via {disp["off_method"]}'
         ladder.append(r(f"idle.{key}", label,
                         [secs(idle[key]["ac"]), secs(idle[key]["battery"])],
-                        mac=[secs(m) for m in mac], win=[secs(w) for w in win],
                         detail=detail))
     ch, chg = pol["battery"]["low"], pol["battery"]["charge"]
     charge = [
         r("low.screen_off", "Turn off backlight + lock at",
-          [pct(ch["backlight_off"])], win="—"),
-        r("low.hibernate", "Hibernate at", [pct(ch["hibernate"])], mac=VARIES, win="5%"),
+          [pct(ch["backlight_off"])]),
+        r("low.hibernate", "Hibernate at", [pct(ch["hibernate"])]),
         r("low.poll", "Battery level checked every", [ch["poll"]]),
         None,
         r("chg.start", "Start charging below", [pct(chg["start"])]),
@@ -213,13 +203,13 @@ def build(pol: dict | None = None, st: dict | None = None):
                   if (rows := grouped.get(name))]
 
     panels = [
-        ("Status", [(None, ONE, status), ("System", ONE, system)], False),
+        ("Status", [(None, ONE, status), ("System", ONE, system)]),
         ("Hardware", [("Button and lid triggers", TWO, press),
-                      ("Suspend and hibernate mechanism", ONE, mech)], True),
+                      ("Suspend and hibernate mechanism", ONE, mech)]),
         ("Power management", [("Idle Actions", TWO, ladder),
                               ("Battery level triggers (only on battery)", ONE, charge),
-                              ("Idle, system-wide (logind)", ONE, logind_rows)], True),
-        ("TLP", tlp_sheets, False),
+                              ("Idle, system-wide (logind)", ONE, logind_rows)]),
+        ("TLP", tlp_sheets),
     ]
     return panels, flags(pol, st, b.shown), b.shown
 

@@ -1,4 +1,12 @@
-# hyprpower policy — the single source of truth for what this laptop does.
+# Default hyprpower policy. Adopt it with:
+#
+#     cp config/presets/default.toml ~/.config/hyprpower/policy.toml
+#     hyprpower apply && sudo hyprpower apply --system
+#
+# Every key must be present: hyprpower holds no values of its own, so a file
+# like this is the only place a default can live.
+#
+# The single source of truth for what the laptop does.
 #
 # Everything is "on TRIGGER, if on AC or on battery, do ACTION". The daemons
 # are dispatchers; none of them owns a decision:
@@ -29,7 +37,7 @@ unit = "hyprlock.service"
 # gets exactly ONE fprintd re-claim attempt across suspend: a stale locker
 # instance consumes it and then fails silently. Harmless but pointless
 # otherwise, so it is off in the default preset.
-restart_on_resume = true
+restart_on_resume = false
 
 [idle.dim]
 ac      = "2m"
