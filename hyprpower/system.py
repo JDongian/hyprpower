@@ -19,6 +19,7 @@ import shutil
 import subprocess
 import time
 from pathlib import Path
+from typing import NamedTuple
 
 from . import policy
 
@@ -219,10 +220,18 @@ def unit_active(unit: str, user: bool = False) -> bool:
     return text == "active"
 
 
-SERVICES = [("hypridle", "hypridle", True), ("tlp", "tlp", False),
-            ("upower", "upower", False), ("acpid", "acpid", False),
-            ("thermald", "thermald", False),
-            ("hibernate-on-low-battery.timer", None, False)]
+class Service(NamedTuple):
+    unit: str
+    binary: str | None      # None when there is no version to report
+    user: bool              # a --user unit rather than a system one
+
+
+SERVICES = [Service("hypridle", "hypridle", True),
+            Service("tlp", "tlp", False),
+            Service("upower", "upower", False),
+            Service("acpid", "acpid", False),
+            Service("thermald", "thermald", False),
+            Service("hibernate-on-low-battery.timer", None, False)]
 
 
 def read(pol: dict) -> dict:
@@ -270,8 +279,9 @@ def read(pol: dict) -> dict:
         "os": re.search(r'PRETTY_NAME="([^"]*)"', slurp("/etc/os-release")).group(1),
         "kernel": slurp("/proc/sys/kernel/osrelease"),
         "systemd": out("systemctl", "--version").split()[1],
-        "services": [(u, unit_active(u, user), pkg_version(b) if b else None)
-                     for u, b, user in SERVICES],
+        "services": [(sv.unit, unit_active(sv.unit, sv.user),
+                      pkg_version(sv.binary) if sv.binary else None)
+                     for sv in SERVICES],
         "hyprland_version": pkg_version("Hyprland"),
         "logind": logind(),
         "hypridle": unit_active("hypridle.service", user=True),

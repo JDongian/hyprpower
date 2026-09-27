@@ -66,7 +66,7 @@ class HyprPower(App):
         self.st = system.read(self.pol)
         self.panels, self.flags, self.shown = build(self.pol, self.st)
         # Marks modified rows GParted-style.
-        self.pending = {p[0]: (p[1], p[2], p[3]) for p in pending(self.pol, self.st)}
+        self.pending = {p.row: p for p in pending(self.pol, self.st)}
         self.problems = problems(self.pol, self.st)
 
     def compose(self) -> ComposeResult:
@@ -150,13 +150,12 @@ class HyprPower(App):
                 if row is None:
                     table.add_row("", *[""] * len(headers))
                     continue
-                rid, label, values, detail = row
-                mark = "* " if rid in self.pending else "  "
-                table.add_row(f"{mark}{label}", *values, key=rid)
-                self._rows.setdefault(rid, []).append((table, rid, label))
-                self._row_tabs.setdefault(rid, set()).add(tab_id)
-                if detail:
-                    table.add_row(Text(f"    └ {detail}", style="dim italic"),
+                mark = "* " if row.id in self.pending else "  "
+                table.add_row(f"{mark}{row.label}", *row.values, key=row.id)
+                self._rows.setdefault(row.id, []).append((table, row.id, row.label))
+                self._row_tabs.setdefault(row.id, set()).add(tab_id)
+                if row.detail:
+                    table.add_row(Text(f"    └ {row.detail}", style="dim italic"),
                                   *[""] * len(headers))
             # Explicit height: DataTable's `height: auto` does not resolve for
             # rows added during compose and collapses to 0, so the tables were
@@ -184,7 +183,7 @@ class HyprPower(App):
         if not confirmed:
             return
         from .system import apply_session, sudo_apply_system
-        root = any(r for _, _, r in self.pending.values())
+        root = any(p.needs_root for p in self.pending.values())
         if root:
             # Before apply_session, not after: a declined password used to
             # leave the session half applied and the system half not.
@@ -285,10 +284,10 @@ class ConfirmApply(ModalScreen[bool]):
 
     def compose(self) -> ComposeResult:
         lines = [Text("Apply these changes?\n", style="bold")]
-        for rid, (have, want, root) in self.changes.items():
-            line = Text(f"  {rid:24} {have}  ->  ", style="")
-            line.append(str(want), style="bold")
-            if root:
+        for p in self.changes.values():
+            line = Text(f"  {p.row:24} {p.have}  ->  ", style="")
+            line.append(str(p.want), style="bold")
+            if p.needs_root:
                 line.append("   (needs root)", style="dim")
             lines.append(line)
         if not self.changes:

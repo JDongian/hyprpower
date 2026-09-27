@@ -12,8 +12,42 @@ drift is a flag rather than a column.
 from __future__ import annotations
 
 from enum import IntEnum
+from typing import NamedTuple
 
 from . import policy
+
+class Row(NamedTuple):
+    """One line in a table. `values` has one entry per column of the section
+    it lands in, so a mismatch is a crash at add_row rather than a wrong
+    cell -- which is how it was found the first time."""
+    id: str
+    label: str
+    values: list[str]
+    detail: str | None = None
+
+
+class Pending(NamedTuple):
+    """A row whose profile value is not yet in force."""
+    row: str
+    have: str
+    want: str
+    needs_root: bool
+
+
+class Drift(NamedTuple):
+    row: str
+    prop: str           # the logind property, or the sysfs attribute
+    have: str
+    want: str
+
+
+class Col(IntEnum):
+    """Which value column a cell is in. IntEnum so the TUI can look up by the
+    raw cursor column and still match these keys."""
+    AC = 0
+    BATTERY = 1
+    ONLY = 0        # single-valued rows have just the one column
+
 
 ONE, TWO = [""], ["Plugged in", "On battery"]
 
@@ -67,10 +101,10 @@ class Build:
         self.pol, self.st = pol, st
         self.shown: dict[str, tuple[str, str]] = {}
 
-    def row(self, rid, label, values, detail=None):
+    def row(self, rid, label, values, detail=None) -> Row:
         cells = [str(v) for v in values]
         self.shown[rid] = (label, " / ".join(cells))
-        return (rid, label, cells, detail)
+        return Row(rid, label, cells, detail)
 
 
 def build(pol: dict, st: dict):
@@ -213,7 +247,7 @@ def flags(pol, st, shown):
 
     # Over the emitted listeners, not the raw policy: a hibernate that
     # follows a suspend is dropped, because systemd performs that escalation.
-    by_source = {src: sorted((t, a) for t, s_, a, _ in policy.rungs(pol) if s_ == src)
+    by_source = {src: sorted((r.after, r.action) for r in policy.rungs(pol) if r.source == src)
                  for src in policy.SOURCES}
     if not any(a in policy.SLEEPS for rs in by_source.values() for _t, a in rs):
         add("Never suspends or hibernates when idle. Stays awake until you close "
@@ -274,30 +308,31 @@ CHARGE_ROW = (("start", "charge_start", "chg.start"),
               ("stop", "charge_stop", "chg.stop"))
 
 
-def lid_drift(pol: dict, st: dict) -> list[tuple[str, str, str, str]]:
+def lid_drift(pol: dict, st: dict) -> list[Drift]:
     want = policy.logind_want(pol)
-    return [(LID_ROW[prop], prop, st["logind"][prop], v)
+    return [Drift(LID_ROW[prop], prop, st["logind"][prop], v)
             for prop, v in want.items() if st["logind"][prop] != v]
 
 
-def charge_drift(pol: dict, st: dict) -> list[tuple[str, int, int]]:
-    return [(rid, st[key], pol["battery"]["charge"][name])
+def charge_drift(pol: dict, st: dict) -> list[Drift]:
+    return [Drift(rid, key, st[key], pol["battery"]["charge"][name])
             for name, key, rid in CHARGE_ROW
             if st[key] != pol["battery"]["charge"][name]]
 
 
-def pending(pol: dict, st: dict) -> list[tuple[str, str, str, bool]]:
-    """Rows not yet in force: (id, in force, wanted, needs root)."""
+def pending(pol: dict, st: dict) -> list[Pending]:
     live = policy.parse_generated(st["live_hypridle"]) if st["live_hypridle"] else {}
-    want = {(src, a): t for t, src, a, _ in policy.rungs(pol)}
+    want = {(r.source, r.action): r.after for r in policy.rungs(pol)}
     rows: dict[str, tuple] = {}
     for key in sorted(set(want) | set(live)):
         if want.get(key) != live.get(key):
             rid = policy.ROW[key[1]]
-            rows.setdefault(rid, (rid, secs(live.get(key)), secs(want.get(key)), False))
+            rows.setdefault(rid, Pending(rid, secs(live.get(key)),
+                                         secs(want.get(key)), False))
     out = list(rows.values())
-    out += [(rid, have, w, True) for rid, _, have, w in lid_drift(pol, st)]
-    out += [(rid, f"{h}%", f"{w}%", True) for rid, h, w in charge_drift(pol, st)]
+    out += [Pending(d.row, d.have, d.want, True) for d in lid_drift(pol, st)]
+    out += [Pending(d.row, f"{d.have}%", f"{d.want}%", True)
+            for d in charge_drift(pol, st)]
     return out
 
 
@@ -314,14 +349,6 @@ def problems(pol: dict, st: dict) -> list[str]:
     if policy.sleep_text(pol) != st["live_sleep"]:
         out.append("Hibernate delay in systemd does not match the profile. Apply to fix.")
     return out
-
-
-class Col(IntEnum):
-    """Which value column a cell is in. IntEnum so the TUI can look up by the
-    raw cursor column and still match these keys."""
-    AC = 0
-    BATTERY = 1
-    ONLY = 0        # single-valued rows have just the one column
 
 
 EDITABLE: dict[tuple[str, int], tuple[str, ...]] = {
