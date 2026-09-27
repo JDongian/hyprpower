@@ -27,7 +27,7 @@ from .view import SYSTEMS, build
 HL = "bold black on yellow"
 
 
-class ThinkPower(App):
+class HyprPower(App):
     CSS = """
     Screen { layout: vertical; }
     /* The flags block sizes to content; the tabs take whatever is left.
@@ -280,7 +280,7 @@ def main() -> None:
         print("sudo is required: applying writes /etc/systemd/logind.conf.d "
               "and battery sysfs", file=sys.stderr)
         raise SystemExit(rc)
-    ThinkPower().run()
+    HyprPower().run()
 
 
 class ConfirmApply(ModalScreen[bool]):
