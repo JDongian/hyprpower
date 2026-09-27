@@ -81,6 +81,11 @@ in
       after = [ "tlp.service" "systemd-logind.service" ];
       wants = [ "tlp.service" ];
       wantedBy = [ "multi-user.target" ];
+      # Skip cleanly rather than fail when there is no profile yet: this
+      # runs at multi-user.target, but a seeded profile only appears at
+      # user login, so the first boot of a fresh install would otherwise
+      # leave a failed unit behind.
+      unitConfig.ConditionPathExists = cfg.policyFile;
       serviceConfig = {
         Type = "oneshot";
         ExecStart = pkgs.writeShellScript "hyprpower-apply-system"

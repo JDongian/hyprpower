@@ -50,8 +50,21 @@ def sh(*cmd: str) -> None:
 
 def save_brightness() -> None:
     """First writer wins, so a later rung never clobbers the real value."""
-    if not saved().exists():
+    if not stored():
         saved().write_text(open(f"{panel()}/brightness").read().strip())
+        # 0666 because the two privilege levels share this file: the idle
+        # ladder saves as you, the low-battery handler as root, and either
+        # may need to clear it. The directory is sticky, so whoever did NOT
+        # create it cannot unlink -- hence clearing by truncation below.
+        os.chmod(saved(), 0o666)
+
+
+def stored() -> str | None:
+    """The saved brightness, or None. Empty means cleared, not missing:
+    truncation is how the other uid releases the slot under a sticky dir."""
+    if not saved().exists():
+        return None
+    return saved().read_text().strip() or None
 
 
 def source() -> str:
@@ -82,9 +95,9 @@ def cmd_do(action: str) -> int:
         # hyprctl failing. dpms only when the display-off rung is configured
         # at all -- that rung leaves the panel powered down, so restoring the
         # brightness alone would wake you to a black screen.
-        if saved().exists():
-            sh("brightnessctl", "--quiet", "set", saved().read_text().strip())
-            saved().unlink()
+        if value := stored():
+            sh("brightnessctl", "--quiet", "set", value)
+            saved().write_text("")
         if any(pol["idle"]["display_off"][s] for s in ("ac", "battery")):
             sh("hyprctl", "dispatch", "dpms", "on")
     else:

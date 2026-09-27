@@ -77,6 +77,9 @@ HibernateDelaySec={delay}
 
 
 def sleep_text(pol: dict) -> str | None:
+    """None when there is nothing to write, INCLUDING an unresolvable
+    conflict. It must not raise: verify and the flags both call this, and
+    throwing here took down the very screen you would fix the conflict on."""
     delay = policy.hibernate_delay(pol)
     return None if delay is None else SLEEP_DROPIN.format(delay=delay)
 
@@ -111,6 +114,11 @@ def apply_system(reload: bool = True) -> Path:
     if reload:
         subprocess.run(["systemctl", "reload", "systemd-logind"], check=True)
 
+    if len(gaps := policy.delay_gaps(pol)) > 1:
+        raise SystemExit(
+            f"suspend->hibernate gaps differ by power source ({sorted(gaps)}s) "
+            f"but HibernateDelaySec is one global value. Make the gaps equal, "
+            f"or use hibernate on only one source.")
     want = sleep_text(pol)
     if want is None:
         SLEEP_PATH.unlink(missing_ok=True)

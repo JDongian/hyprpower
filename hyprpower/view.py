@@ -233,6 +233,10 @@ def flags(pol, st, shown):
             *sorted({policy.ROW[a] for _, _, acts in cols for a in acts}))
     # Inverted: `ignore` is systemd's default and is correct. An action here
     # would mean logind and hypridle both hold idle policy and race.
+    if len(policy.delay_gaps(pol)) > 1:
+        add("The two power sources want different hibernate delays, but "
+            "systemd has only one. Applying will refuse.",
+            "idle.suspend", "idle.hibernate")
     if lg["IdleAction"] != "ignore":
         add("logind acts on idle too. It fights the ladder above.", "idle.logind")
 

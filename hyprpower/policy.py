@@ -143,15 +143,23 @@ def systemd_sleep(pol: dict, source: str, action: str) -> str:
     return SYSTEMD.get(action, action)
 
 
+def delay_gaps(pol: dict) -> set[int]:
+    """Distinct suspend->hibernate gaps across the power sources.
+
+    More than one is unrepresentable: HibernateDelaySec is a single global
+    systemd setting. This returns the set rather than asserting, so the TUI
+    can open and show the conflict -- an assert here made the whole tool
+    unusable, including the screen you would fix it on.
+    """
+    return {seconds(pol["idle"]["hibernate"][s]) - seconds(pol["idle"]["suspend"][s])
+            for s in SOURCES if escalates(pol, s)}
+
+
 def hibernate_delay(pol: dict) -> int | None:
-    """Seconds to stay suspended before hibernating, or None."""
-    gaps = {seconds(pol["idle"]["hibernate"][s]) - seconds(pol["idle"]["suspend"][s])
-            for s in SOURCES
-            if seconds(pol["idle"]["suspend"][s]) is not None
-            and seconds(pol["idle"]["hibernate"][s]) is not None
-            and seconds(pol["idle"]["hibernate"][s]) > seconds(pol["idle"]["suspend"][s])}
-    assert len(gaps) <= 1, f"HibernateDelaySec is one global value, got {gaps}"
-    return gaps.pop() if gaps else None
+    """Seconds to stay suspended before hibernating. None if unset OR in
+    conflict; callers that write it must check delay_gaps first."""
+    gaps = delay_gaps(pol)
+    return gaps.pop() if len(gaps) == 1 else None
 
 
 def render_hypridle(pol: dict, exe: str = "hyprpower") -> str:
