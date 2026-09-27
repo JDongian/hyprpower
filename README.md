@@ -116,6 +116,27 @@ battery timer. [`nix/nixos.nix`](nix/nixos.nix) and
 [`nix/home-manager.nix`](nix/home-manager.nix) are the reference for what
 those need to be.
 
+## What it touches
+
+`hyprpower` itself is unprivileged and refuses to start as root. Only
+`apply --system` escalates, and it writes exactly three things:
+
+```
+/etc/systemd/logind.conf.d/50-hyprpower.conf   lid, HandlePowerKey=ignore
+/etc/systemd/sleep.conf.d/50-hyprpower.conf    HibernateDelaySec
+<battery>/charge_control_{start,end}_threshold
+```
+
+Everything else stays in your home: the profile, the generated hypridle
+config under `~/.local/state`, and a brightness slot in `/run/hyprpower`
+shared with the root-side battery handler.
+
+The profile cannot smuggle in commands. Actions are a closed set —
+`ignore`, `lock`, `suspend`, `hibernate`, `shutdown` — and anything else is
+rejected rather than executed. The one exception is `[lock] unit`, which is
+interpolated into the generated config as a `systemctl` argument, so treat
+the profile with the same trust you give your shell rc.
+
 ## Scope
 
 Hyprland only, and developed on one ThinkPad running NixOS. The compositor
