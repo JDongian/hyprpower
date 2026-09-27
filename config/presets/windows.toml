@@ -1,0 +1,41 @@
+# Windows 11 defaults for an S3 laptop, Balanced plan. Reference only.
+#
+# Windows does NOT lock on idle: the lock is a consequence of suspending,
+# with "require sign-in on wake" on by default. Separately, once the lock
+# screen is up, VIDEOCONLOCK blanks the display after 60s.
+#
+# Windows splits every one of these by power source, including the power
+# button (PBUTTONACTION carries AC and DC indexes) -- logind splits only the
+# lid, which is why [button.power] needs acpid here.
+
+[display]
+dim_to = "10%"
+off_method = "dpms"
+
+[idle.ac]
+dim           = "5m"
+backlight_off = "5m"
+display_off   = "5m"
+lock          = "on-suspend"
+suspend       = "15m"
+
+[idle.battery]
+dim           = "2m"
+backlight_off = "3m"
+display_off   = "3m"
+lock          = "on-suspend"
+suspend       = "10m"
+
+[lid]
+ac      = "suspend"
+battery = "suspend"
+
+[button.power]
+ac      = "suspend"
+battery = "suspend"
+
+# Low battery 10%, reserve 7%, critical 5% with action Hibernate.
+[charge]
+warn      = 10
+reserve   = 7
+hibernate = 5
