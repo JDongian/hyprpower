@@ -38,50 +38,33 @@ until reloaded, and TLP rewrites the charge thresholds when it restarts.
 
 ## The profile
 
-```toml
-[idle.dim]
-ac      = "2m"
-battery = "1m45s"      # the power source is always the leaf key
+Every entry is the same primitive: **on a trigger, check a condition, take an
+action.** The trigger is idle time, a charge level, the lid or the power
+button. The condition is almost always which power source you are on. The
+action comes from a closed set. Four daemons can be driven from one file
+because every setting is written in that one shape.
 
-[idle.suspend]
-ac      = false        # false means never
-battery = "10m"
+hyprpower holds no values of its own. Every key must be present, and a
+missing one is an error instead of a silent default, so the file is the whole
+story. Defaults are a file you copy, not behaviour hidden in code.
 
-[idle.hibernate]
-ac      = false
-battery = "20m"        # with the suspend above: RAM at 10m, disk at 20m
+Sleep is composed, not picked from a list of modes. Set a suspend and a
+hibernate on the same power source and the gap between them becomes the
+delay, so the second number is one you can read instead of a
+`HibernateDelaySec` you cannot.
 
-[lid]
-docked  = "ignore"     # docked wins over the two below
-ac      = "suspend"
-battery = "suspend"
-
-[button.power]
-ac      = "suspend"
-battery = "hibernate"
-
-[battery.charge]
-start = 70             # begin charging below this
-stop  = 80
-
-[battery.low]          # charge level, not time; on battery by definition
-dim           = 15
-backlight_off = 6
-hibernate     = 5
-```
-
-Actions are `ignore`, `lock`, `suspend`, `hibernate` and `shutdown`.
-Durations are `false` or a string: `"90s"`, `"2m30s"`, `"10m"`.
-
-Set `[idle.suspend]` and `[idle.hibernate]` together and they compose: RAM at
-the first time, disk at the second. Nothing in userspace runs while the
-machine is asleep, so systemd performs the escalation on an RTC alarm.
+The shipped default explains each setting where it sits:
+[`hyprpower/default.toml`](hyprpower/default.toml).
 
 ## The TUI
 
-`e` edits a value back into the profile, comments intact. `a` applies,
-escalating once for the system half. The flag list names settings that
-cannot work:
+Four daemons' worth of settings on one screen, beside what the machine is
+currently doing. What hyprpower owns is editable there; what TLP and logind
+own is shown read-only, because a screen that left them out would be a
+half-truth about the same laptop.
+
+Seeing the values is not the same as seeing what they add up to, so it also
+names settings that cannot work:
 
 ```
 * Scheduled after the machine is already asleep, so it never runs.
@@ -95,10 +78,11 @@ after the machine sleeps is caught, not only the pairs someone thought of.
 
 ## What it does not do
 
-hyprpower owns policy, not tuning. It does not set the CPU governor, disk or
-USB runtime power, or radio power saving; TLP owns those and hyprpower only
-reads them. It does not manage keyboard backlight, external display
-brightness, power profiles, or thermal limits.
+hyprpower owns policy, not tuning. The CPU governor, disk and USB runtime
+power and radio power saving belong to TLP; hyprpower shows them and changes
+none of them. It does not switch `power-profiles-daemon` profiles, drive the
+keyboard backlight or an external display's brightness, or set thermal
+limits.
 
 ## Install
 

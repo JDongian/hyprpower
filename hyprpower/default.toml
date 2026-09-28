@@ -13,19 +13,21 @@
 #   [idle.*]     -> generated hypridle listeners
 #   [lid]        -> logind drop-in (logind splits the lid natively)
 #   [button.*]   -> acpid, because logind has no power-source variant for keys
-#   [charge]     -> systemd timer polling the battery
+#   [battery.*]  -> systemd timer polling the charge level
 #
 # THE POWER SOURCE IS ALWAYS THE LEAF KEY, everywhere in this file, so every
-# setting maps to its two values with the same shape. Durations: "90s",
-# "2m30s", "10m". false = never.
+# setting maps to its two values with the same shape.
 #
-# Not here: CPU governor, charge start/stop thresholds, device runtime PM.
-# TLP owns those and hyprpower only reads them.
+# Actions:   ignore, lock, suspend, hibernate, shutdown
+# Durations: false, or a string -- "90s", "2m30s", "10m"
+# Levels:    a percentage as a bare number, or false
+#
+# Not here: CPU governor, device runtime power, radio power saving. TLP owns
+# the tuning; hyprpower owns the policy and only reads TLP.
 
 [display]
 # What "dim" means. MUST carry a unit: brightnessctl reads a bare 10 as a raw
-# value, which on a 24242-step panel is 0.04% — the current config says
-# `set 10` and has been blanking the screen rather than dimming it.
+# value, which on a 24242-step panel is 0.04% -- a blank screen, not a dim.
 dim_to = "10%"
 
 [lock]
@@ -50,6 +52,9 @@ battery = "2m"
 ac      = false
 battery = false
 
+# A second after the backlight goes off, so the two never land on the same
+# timeout: hypridle decides the order between listeners that share one, and
+# waking to a locked black screen reads better than the reverse.
 [idle.lock]
 ac      = "10m1s"
 battery = "2m1s"
@@ -81,6 +86,8 @@ battery = "suspend"
 ac      = "suspend"
 battery = "hibernate"
 
+# Holding the button is cut by firmware after a few seconds whatever we say,
+# so there is nothing useful to put here.
 [button.power_held]
 ac      = "ignore"
 battery = "ignore"
@@ -98,4 +105,4 @@ stop  = 80     # stop charging at this: holding 100% ages the cell faster,
 dim           = 15     # first warning: you can still see the screen
 backlight_off = 6      # park the screen, keep polling
 hibernate     = 5      # the save-your-work action
-poll          = "1m"
+poll          = "1m"    # how often the timer checks; not a trigger
