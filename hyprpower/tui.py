@@ -294,7 +294,12 @@ class HyprPower(App):
         if result is None:
             return
         path, raw = result
-        system.save(path, coerce(raw))
+        try:
+            value = coerce(path, raw)
+        except ValueError as e:
+            self.notify(f"{raw!r} rejected: {e}", severity="error")
+            return
+        system.save(path, value)
         self.action_reload()
         self.notify(f"{'.'.join(path)} = {raw}   (press a to apply)")
 

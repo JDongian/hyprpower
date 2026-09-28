@@ -76,18 +76,74 @@ STEPS = (Step("dim", Action.DIM, True),
 
 ROW = {s.action: f"idle.{s.key}" for s in STEPS}
 
-# Every key that must be present. hyprpower holds no values of its own, so a
-# missing key is an error, not a default.
-REQUIRED = tuple(
-    [("display", "dim_to"), ("lock", "unit"), ("lock", "restart_on_resume"),
-     ("lid", "docked"), ("lid", "ac"), ("lid", "battery"),
-     ("battery", "charge", "start"), ("battery", "charge", "stop"),
-     ("battery", "low", "dim"), ("battery", "low", "backlight_off"),
-     ("battery", "low", "hibernate"),
-     ("battery", "low", "poll")]
-    + [("idle", s.key, src) for s in STEPS for src in SOURCES]
-    + [("button", b, src) for b in ("power", "power_held") for src in SOURCES]
-)
+UNIT = {"h": 3600, "m": 60, "s": 1}
+_TOKEN = re.compile(r"(\d+)\s*([hms])\s*")
+
+
+def seconds(v) -> int | None:
+    """'2m30s' -> 150.  false -> None (never).
+
+    fullmatch, not a scan. Scanning accepted anything with a token buried in
+    it: '1.5h' matched the '5h' and silently meant five hours, '-5m' dropped
+    the sign, and 'abc10m' passed. A bool is excluded because it is an int in
+    Python, so True would otherwise mean one second.
+    """
+    if v is False or v is None:
+        return None
+    if isinstance(v, int) and not isinstance(v, bool):
+        return v
+    if not isinstance(v, str) or not re.fullmatch(f"(?:{_TOKEN.pattern})+", v):
+        raise ValueError(f"unparseable duration: {v!r}")
+    return sum(int(n) * UNIT[u] for n, u in _TOKEN.findall(v))
+
+
+# What a trigger may be told to do. dim / backlight-off / restore are rungs
+# of the idle ladder, not things a lid or a button can be set to.
+TRIGGERABLE = SYSTEMCTL | {Action.LOCK, Action.IGNORE}
+
+# Every key, and the kind of value it takes. hyprpower holds no values of its
+# own, so a missing key is an error -- and so is a value of the wrong shape,
+# which used to travel until something deep in rendering choked on it.
+SPAN, LEVEL, DO, TEXT, FLAG = "duration", "level", "action", "text", "flag"
+
+SCHEMA = {
+    ("display", "dim_to"): TEXT,
+    ("lock", "unit"): TEXT,
+    ("lock", "restart_on_resume"): FLAG,
+    ("lid", "docked"): DO,
+    ("lid", "ac"): DO,
+    ("lid", "battery"): DO,
+    ("battery", "charge", "start"): LEVEL,
+    ("battery", "charge", "stop"): LEVEL,
+    ("battery", "low", "dim"): LEVEL,
+    ("battery", "low", "backlight_off"): LEVEL,
+    ("battery", "low", "hibernate"): LEVEL,
+    ("battery", "low", "poll"): SPAN,
+    **{("idle", st.key, src): SPAN for st in STEPS for src in SOURCES},
+    **{("button", b, src): DO for b in ("power", "power_held") for src in SOURCES},
+}
+
+
+def check(kind: str, value) -> None:
+    """Raise ValueError if the value is not what this key takes."""
+    if kind == SPAN:
+        seconds(value)
+    elif kind == LEVEL:
+        if value is not False and not (isinstance(value, int)
+                                       and not isinstance(value, bool)
+                                       and 0 <= value <= 100):
+            raise ValueError("expected a percentage 0-100, or false")
+    elif kind == DO:
+        if value not in TRIGGERABLE:
+            raise ValueError("expected one of " +
+                             ", ".join(sorted(str(a) for a in TRIGGERABLE)))
+    elif kind == FLAG:
+        if not isinstance(value, bool):
+            raise ValueError("expected true or false")
+    elif kind == TEXT:
+        if not isinstance(value, str) or not value:
+            raise ValueError("expected a non-empty string")
+
 
 _MISSING = object()
 
@@ -103,24 +159,21 @@ def _get(pol: dict, keys):
 
 def parse(text: str, where: str = "profile") -> dict:
     pol = tomllib.loads(text)
-    missing = [".".join(p) for p in REQUIRED if _get(pol, p) is _MISSING]
+    missing, bad = [], []
+    for keys, kind in SCHEMA.items():
+        value = _get(pol, keys)
+        if value is _MISSING:
+            missing.append(".".join(keys))
+            continue
+        try:
+            check(kind, value)
+        except ValueError as e:
+            bad.append(f"{'.'.join(keys)} = {value!r}: {e}")
     if missing:
         raise SystemExit(f"{where} is incomplete; add:\n  " + "\n  ".join(missing))
+    if bad:
+        raise SystemExit(f"{where} has bad values:\n  " + "\n  ".join(bad))
     return pol
-
-
-def seconds(v) -> int | None:
-    """'2m30s' -> 150.  false -> None (never)."""
-    if v is False or v is None:
-        return None
-    if isinstance(v, int):
-        return v
-    total = 0
-    for n, unit in re.findall(r"(\d+)\s*([hms])", v):
-        total += int(n) * {"h": 3600, "m": 60, "s": 1}[unit]
-    if not total:
-        raise ValueError(f"unparseable duration: {v!r}")
-    return total
 
 
 def escalates(pol: dict, source: str) -> bool:

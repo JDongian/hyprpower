@@ -378,14 +378,24 @@ EDITABLE: dict[tuple[str, int], tuple[str, ...]] = {
 }
 
 
-def coerce(raw: str):
-    """'never'/'false' -> False, digits -> int, else the string as given."""
+def coerce(path: tuple[str, ...], raw: str):
+    """Typed value for this key, or ValueError.
+
+    Validating here is what keeps a typo out of the profile. It used to be
+    written unchecked, and the next read crashed -- including the read the
+    TUI does on startup, so the tool could no longer open to fix it.
+    """
     text = raw.strip()
     if text.lower() in ("never", "false", "off", "none"):
-        return False
-    if text.isdigit():
-        return int(text)
-    return text
+        value = False
+    elif text.isdigit():
+        value = int(text)
+    elif text.lower() == "true":
+        value = True
+    else:
+        value = text
+    policy.check(policy.SCHEMA[path], value)
+    return value
 
 
 def current(pol: dict, path: tuple[str, ...]):
