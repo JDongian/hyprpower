@@ -421,8 +421,8 @@ def cmd_do(action: str) -> int:
         run("brightnessctl", "--quiet", "set",
             pol["display"]["dim_to"] if action == policy.Action.DIM else "0")
     elif action == policy.Action.DISPLAY_OFF:
-        # Opt-in only: a dpms-off listener crashed the whole Hyprland session
-        # on 0.55.x (SIGABRT -> greetd relogin).
+        # Crashed the session on 0.55.x (SIGABRT -> greetd relogin), which is
+        # why the rung shipped disabled. Verified working on 0.56.2.
         run("hyprctl", "dispatch", "dpms", "off")
     elif action == policy.Action.LOCK:
         run("loginctl", "lock-session")
