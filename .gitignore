@@ -6,3 +6,4 @@ dist/
 *.egg-info/
 config/profile.toml
 build/
+.launch/
